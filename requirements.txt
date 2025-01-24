@@ -1,0 +1,11 @@
+torch
+setuptools
+matplotlib
+seaborn
+pandas
+black>24.3.0
+ufmt==2.0.0
+usort==1.0.4
+tqdm
+pyyaml
+pytest
