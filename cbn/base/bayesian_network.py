@@ -112,7 +112,7 @@ class BayesianNetwork:
 
         # Convert evidence keys from column names to indices if needed
         translated_evidence = {
-            self.column_mapping.get(key, key): value
+            self.column_mapping.get(key, key): (value, uncertainty)
             for key, value in parents_evidence.items()
         }
 
@@ -121,7 +121,7 @@ class BayesianNetwork:
         # )  # Debug: Print the translated evidence
 
         # Pass the translated evidence to the node's CPD computation
-        return self.nodes[node_name].get_cpds(translated_evidence, uncertainty)
+        return self.nodes[node_name].get_cpds(translated_evidence)
 
     def print_structure(self):
         """Prints the structure of the Bayesian Network."""
@@ -147,38 +147,5 @@ if __name__ == "__main__":
 
     # Infer CPDs for node C given evidence for A and B
     evidence = {"A": 1.5, "B": 1.0}
-    mean, uncertainty = bn.infer_cpds("C", evidence, 10)
-    print("Mean:", mean)
-    print("Uncertainty:", uncertainty)
-
-    dag = nx.DiGraph()
-    dag.add_edges_from([("0", "2"), ("1", "2")])
-
-    # Define the data as a numpy array
-    data_np = data.values
-
-    # Define the same data as a torch tensor
-    data_torch = tensor_data = torch.tensor(data.values, dtype=torch.float32)
-
-    # Initialize Bayesian Network with numpy array
-    print("Initializing Bayesian Network with np.ndarray:")
-    bn_np = BayesianNetwork(dag=dag, data=data_np)
-    bn_np.print_structure()
-
-    # Inference
-    evidence = {0: 1.5, 1: 1.0}
-    mean_np, covariance_np = bn_np.infer_cpds("2", evidence, uncertainty=10)
-    print("Mean (np.ndarray):", mean_np)
-    print("Covariance (np.ndarray):", covariance_np)
-
-    print("\n--------------------------------------------\n")
-
-    # Initialize Bayesian Network with torch tensor
-    print("Initializing Bayesian Network with torch.Tensor:")
-    bn_torch = BayesianNetwork(dag=dag, data=data_torch)
-    bn_torch.print_structure()
-
-    # Inference
-    mean_torch, covariance_torch = bn_torch.infer_cpds("2", evidence, uncertainty=10)
-    print("Mean (torch.Tensor):", mean_torch)
-    print("Covariance (torch.Tensor):", covariance_torch)
+    initialized_distribution = bn.infer_cpds("C", evidence, 1)
+    print("Mean:", initialized_distribution)

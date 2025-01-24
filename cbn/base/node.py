@@ -1,15 +1,49 @@
-from typing import Dict, List, Optional
+from __future__ import annotations
 
+from typing import Dict, List, Optional, Tuple
+
+import matplotlib.pyplot as plt
 import pandas as pd
 import torch
 
+from cbn.base.learning_parameters import BaseEstimator
+from cbn.parameters_estimators.parametric_estimator import ParametricEstimator
+from cbn.utils import get_distribution_parameters
+
 
 class NodeVariable:
-    def __init__(self, node_name: int | str, parents: List):
+    def __init__(
+        self,
+        node_name: int | str,
+        parents: List,
+        device: str = "cpu",
+        estimator_config: Dict = None,
+    ):
         self.name = node_name
         self.parents = parents
         self.node_data = torch.zeros((1, 0))  # Initially no samples
         self.parents_data = torch.zeros((len(self.parents), 0))
+
+        self.device = device
+
+        self.estimator = self._setup_parameters_estimator(estimator_config)
+
+    def _setup_parameters_estimator(self, estimator_config: Dict) -> BaseEstimator:
+        if estimator_config is None:
+            return ParametricEstimator("normal", self.device)
+        else:
+            estimator_type = estimator_config["type"]
+            estimator_name = estimator_config["name"]
+            kwargs = estimator_config["kwargs"]
+
+            if estimator_type == "parametric":
+                self.estimator = ParametricEstimator(
+                    estimator_name, self.device, **kwargs
+                )
+            elif estimator_type == "non_parametric":
+                raise NotImplementedError
+            else:
+                raise ValueError(f"estimator type {estimator_type} is not defined")
 
     def set_data(
         self,
@@ -76,20 +110,27 @@ class NodeVariable:
             else:
                 raise ValueError(f"{self.name} has no parents")
 
-    def get_cpds(self, parents_evidence: Dict[int, float], uncertainty: float = 0.1):
+    def get_cpds(
+        self,
+        parents_evidence: Dict[int, Tuple[float, Optional[float]]],
+        default_parents_uncertainty: float = 0.1,
+    ) -> torch.distributions.Distribution:
         """
         Get the CPDs (mean and covariance) of the node based on the parents' evidence.
 
         Args:
-            parents_evidence (Dict[int, float]): A dictionary mapping parent indices to their evidence values.
-            uncertainty (float): The range of uncertainty for matching the evidence.
+            parents_evidence (Dict[int, Tuple[float, Optional[float]]]): A dictionary mapping parent indices
+                to their evidence values and optional uncertainties as (mean, uncertainty). If uncertainty is
+                not provided, the default value will be used.
+            default_parents_uncertainty (float): Default uncertainty to use if not specified for a parent.
 
         Returns:
-            torch.Tensor, torch.Tensor: The mean and covariance of the node given the evidence.
+            torch.distributions.Distribution: The initialized distribution object.
         """
         if not parents_evidence:
             parents_evidence = {
-                i: torch.mean(self.parents_data[i]) for i in range(len(self.parents))
+                i: (torch.mean(self.parents_data[i]), default_parents_uncertainty)
+                for i in range(len(self.parents))
             }
 
         if max(parents_evidence.keys()) >= len(self.parents):
@@ -101,46 +142,64 @@ class NodeVariable:
             parent_indices, :
         ]  # Shape: (len(evidence), n_samples)
 
-        """print(f"\nProcessing Node: {self.name}")
-        print(f"Parents Data Subset (for {self.name}): {parents_data_subset}")
-        print(f"Parents Evidence (for {self.name}): {parents_evidence}")"""
+        # Extract means and uncertainties for parents
+        means = torch.tensor(
+            [parents_evidence[i][0] for i in parent_indices],
+            device=self.parents_data.device,
+        )
+        uncertainties = torch.tensor(
+            [
+                (
+                    parents_evidence[i][1]
+                    if len(parents_evidence[i]) > 1
+                    else default_parents_uncertainty
+                )
+                for i in parent_indices
+            ],
+            device=self.parents_data.device,
+        )
 
-        # Create conditions
+        """# Debugging: Print information
+        print(f"\nProcessing Node: {self.name}")
+        print(f"Parents Data Subset (for {self.name}): {parents_data_subset}")
+        print(f"Parents Means (for {self.name}): {means}")
+        print(f"Parents Uncertainties (for {self.name}): {uncertainties}")"""
+
+        # Create conditions for filtering data based on parent evidence
         conditions = [
-            (parents_data_subset[i, :] >= value - uncertainty)
-            & (parents_data_subset[i, :] <= value + uncertainty)
-            for i, value in enumerate(parents_evidence.values())
+            (parents_data_subset[i, :] >= mean - unc)
+            & (parents_data_subset[i, :] <= mean + unc)
+            for i, (mean, unc) in enumerate(zip(means, uncertainties))
         ]
-        for i, cond in enumerate(conditions):
-            print(f"Condition {i} (for parent {self.parents[i]}): {cond}")
 
         # Combine conditions across features
         combined_condition = torch.stack(conditions, dim=0).all(dim=0)
-        # print(f"Combined Condition (for {self.name}): {combined_condition}")
 
         # Filter data based on the combined condition
         selected_indices = combined_condition.nonzero(as_tuple=True)[0]
-        # print(f"Selected Indices (for {self.name}): {selected_indices}")
 
         if selected_indices.numel() == 0:
-            print(f"No matches found for Node: {self.name}. Returning NaNs.")
-            return torch.tensor([float("nan")]), torch.tensor([float("nan")])
+            raise ValueError(f"No matches found for Node: {self.name}. Returning NaNs.")
 
         # Select node data for this node
-        selected_node_data = self.node_data[:, selected_indices]
-        # print(f"Selected Node Data (for {self.name}): {selected_node_data}")
+        selected_data_node = self.node_data[:, selected_indices]
 
-        # Compute mean and covariance for the selected data
-        mean = torch.mean(selected_node_data, dim=1)
-        covariance = (
-            torch.cov(selected_node_data)
-            if selected_node_data.size(1) > 1
-            else torch.tensor([[0.0]])
-        )
-        # print(f"Mean (for {self.name}): {mean}")
-        # print(f"Covariance (for {self.name}): {covariance}")
+        if isinstance(self.estimator, ParametricEstimator):
+            return self.estimator.compute_parameters(selected_data_node)
+        elif isinstance(self.estimator, None):
+            all_data = self.parents_data[:, selected_indices]
 
-        return mean, covariance
+            # Create points (means and uncertainties) for non-parametric estimator
+            points = torch.stack(
+                [means, uncertainties], dim=1
+            )  # Shape: [len(parents), 2]
+
+            # Use the non-parametric estimator to compute the PDF for the specific feature
+            pdf, values, parameters = self.estimator.compute_parameters(
+                data=all_data, points=points
+            )
+
+            raise NotImplementedError
 
 
 if __name__ == "__main__":
@@ -157,12 +216,19 @@ if __name__ == "__main__":
 
     node_reward.set_data(node_data=tensor_reward, parents_data=tensor_parents)
 
-    mean, uncertainty = node_reward.get_cpds({0: 14, 1: 2}, 1)
+    initialized_distribution = node_reward.get_cpds({0: (14, 0), 1: (2, 0)})
 
-    print("Mean: ", mean)
-    print("Uncertainty: ", uncertainty)
-    print("******")
-    mean, uncertainty = node_reward.get_cpds({0: 14, 1: 2}, 0.1)
+    print("PDF: ", initialized_distribution)
+    print(get_distribution_parameters(initialized_distribution))
 
-    print("Mean: ", mean)
-    print("Uncertainty: ", uncertainty)
+    if isinstance(initialized_distribution, torch.distributions.Categorical):
+        y_values = torch.unique(tensor_reward)
+    else:
+        y_values = torch.linspace(
+            torch.min(tensor_reward), torch.max(tensor_reward), 1000
+        )
+
+    pdf = initialized_distribution.log_prob(y_values)
+
+    plt.plot(y_values.cpu().numpy(), pdf.cpu().numpy())
+    plt.show()
