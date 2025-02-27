@@ -113,7 +113,6 @@ class ParametricEstimator(BaseEstimator):
         else:
             raise ValueError(f"Unsupported distribution: {self.distribution_name}")
 
-        print(self.distribution_class)
         # Initialize the distribution object
         distribution = self.distribution_class(**self.parameters)
 
