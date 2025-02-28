@@ -230,6 +230,3 @@ if __name__ == "__main__":
     print("PDF: ", pdf)
     print("Target Values: ", target_values)
     bn.plot_cpds(cpd, target_values)
-
-    dict_res = bn.get_all_cpds_and_pdfs("reward", ["action", "obs_0"])
-    print(dict_res)

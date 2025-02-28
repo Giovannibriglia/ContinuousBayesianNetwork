@@ -6,10 +6,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-from tqdm import tqdm
 
-from cbn.base.learning_parameters import BaseEstimator
-from cbn.parameters_estimators.parametric_estimator import ParametricEstimator
+from cbn.base.parameters_estimator import BaseParameterEstimator
+from cbn.base.probability_estimator import BaseProbabilityEstimator
+from cbn.parameters_estimators.mle import MaximumLikelihoodEstimator
+from cbn.probability_estimators.parametric_estimator import ParametricEstimator
 
 
 class NodeVariable:
@@ -18,7 +19,8 @@ class NodeVariable:
         node_name: int | str,
         parents: List,
         device: str = "cpu",
-        estimator_config: Dict = None,
+        parameters_estimator_config: Dict = None,
+        probability_estimator_config: Dict = None,
     ):
         self.node_name = node_name
         self.parents = parents
@@ -27,20 +29,41 @@ class NodeVariable:
 
         self.device = device
 
-        self.estimator = self._setup_parameters_estimator(estimator_config)
+        self.parameters_estimator = self._setup_parameters_estimator(
+            parameters_estimator_config
+        )
+        self.probability_estimator = self._setup_probability_estimator(
+            probability_estimator_config
+        )
 
-    def _setup_parameters_estimator(self, estimator_config: Dict) -> BaseEstimator:
+    def _setup_parameters_estimator(
+        self, estimator_config: Dict
+    ) -> BaseParameterEstimator:
+        if estimator_config is None:
+            return MaximumLikelihoodEstimator(self.device)
+        else:
+            estimator_name = estimator_config["name"]
+            kwargs = estimator_config["kwargs"]
+
+            if estimator_name == "mle":
+                return MaximumLikelihoodEstimator(self.device, **kwargs)
+            elif estimator_name == "bayesian_estimator":
+                raise NotImplementedError
+            else:
+                raise ValueError(f"estimator type {estimator_name} is not defined")
+
+    def _setup_probability_estimator(
+        self, estimator_config
+    ) -> BaseProbabilityEstimator:
         if estimator_config is None:
             return ParametricEstimator("normal", self.device)
         else:
             estimator_type = estimator_config["type"]
-            estimator_name = estimator_config["name"]
+            output_distribution = estimator_config["distribution"]
             kwargs = estimator_config["kwargs"]
 
             if estimator_type == "parametric":
-                self.estimator = ParametricEstimator(
-                    estimator_name, self.device, **kwargs
-                )
+                return ParametricEstimator(output_distribution, self.device, **kwargs)
             elif estimator_type == "non_parametric":
                 raise NotImplementedError
             else:
@@ -146,7 +169,7 @@ class NodeVariable:
         # Extract means and uncertainties for parents
         means = torch.tensor(
             [parents_evidence[i][0] for i in parent_indices],
-            device=self.parents_data.device,
+            device=self.device,
         )
         uncertainties = torch.tensor(
             [
@@ -157,7 +180,7 @@ class NodeVariable:
                 )
                 for i in parent_indices
             ],
-            device=self.parents_data.device,
+            device=self.device,
         )
 
         """# Debugging: Print information
@@ -166,238 +189,17 @@ class NodeVariable:
         print(f"Parents Means (for {self.name}): {means}")
         print(f"Parents Uncertainties (for {self.name}): {uncertainties}")"""
 
-        """# Create conditions for filtering data based on parent evidence
-        conditions = [
-            (parents_data_subset[i, :] >= mean - unc)
-            & (parents_data_subset[i, :] <= mean + unc)
-            for i, (mean, unc) in enumerate(zip(means, uncertainties))
-        ]
-
-        # Combine conditions across features
-        combined_condition = torch.stack(conditions, dim=0).all(dim=0)
-
-        # Filter data based on the combined condition
-        selected_indices = combined_condition.nonzero(as_tuple=True)[0]
-
-        if selected_indices.numel() == 0:
-            raise ValueError(
-                f"No matches found for Node: {self.node_name}. Returning NaNs. Try to increase uncertainty."
-            )"""
-
-        def find_min_uncertainty(
-            parents_data_subset,
-            means,
-            uncertainties,
-            min_factor=0.1,
-            max_factor=100.0,
-            tol=0.1,
-        ):
-            """
-            Finds the minimum possible uncertainty that still results in at least one match.
-
-            Parameters:
-            - parents_data_subset: Tensor of shape [n_features, n_samples]
-            - means: List or Tensor of means for each feature
-            - uncertainties: List or Tensor of initial uncertainties
-            - min_factor: Minimum scale factor for uncertainty
-            - max_factor: Maximum scale factor for uncertainty
-            - tol: Convergence tolerance for binary search
-
-            Returns:
-            - Optimized uncertainties that minimize `unc` while still selecting at least one sample.
-            """
-            min_unc = torch.tensor(
-                [unc * min_factor for unc in uncertainties],
-                device=parents_data_subset.device,
-            )
-            max_unc = torch.tensor(
-                [unc * max_factor for unc in uncertainties],
-                device=parents_data_subset.device,
-            )
-
-            while (max_unc - min_unc).max() > tol:
-                mid_unc = (min_unc + max_unc) / 2  # Binary search midpoint
-
-                # Compute conditions with the current mid_unc
-                conditions = [
-                    (parents_data_subset[i, :] >= mean - unc)
-                    & (parents_data_subset[i, :] <= mean + unc)
-                    for i, (mean, unc) in enumerate(zip(means, mid_unc))
-                ]
-
-                combined_condition = torch.stack(conditions, dim=0).all(dim=0)
-                selected_indices = combined_condition.nonzero(as_tuple=True)[0]
-
-                if selected_indices.numel() > 0:
-                    max_unc = mid_unc  # Decrease uncertainty to minimize it
-                else:
-                    min_unc = (
-                        mid_unc  # Increase uncertainty to allow at least one match
-                    )
-
-            return max_unc  # Smallest working uncertainty
-
-        # Find minimal uncertainty
-        optimized_uncertainties = find_min_uncertainty(
-            parents_data_subset, means, uncertainties, default_parents_uncertainty
+        query = torch.tensor(
+            [(mean, unc) for mean, unc in zip(means, uncertainties)], device=self.device
         )
 
-        # Use the optimized uncertainty to filter data
-        conditions = [
-            (parents_data_subset[i, :] >= mean - unc)
-            & (parents_data_subset[i, :] <= mean + unc)
-            for i, (mean, unc) in enumerate(zip(means, optimized_uncertainties))
-        ]
-
-        combined_condition = torch.stack(conditions, dim=0).all(dim=0)
-        selected_indices = combined_condition.nonzero(as_tuple=True)[0]
-
-        if selected_indices.numel() == 0:
-            raise ValueError(
-                f"No matches found for Node: {self.node_name}. Unexpected failure in binary search."
-            )
-
-        # Select node data for this node
-        selected_data_node = self.node_data[:, selected_indices]
-
-        if isinstance(self.estimator, ParametricEstimator):
-            return (
-                self.estimator.compute_parameters(selected_data_node),
-                self.node_data.unique().to(self.device),
-            )
-        elif isinstance(self.estimator, None):
-            all_data = self.parents_data[:, selected_indices]
-
-            # Create points (means and uncertainties) for non-parametric estimator
-            points = torch.stack(
-                [means, uncertainties], dim=1
-            )  # Shape: [len(parents), 2]
-
-            # Use the non-parametric estimator to compute the PDF for the specific feature
-            pdf, values, parameters = self.estimator.compute_parameters(
-                data=all_data, points=points
-            )
-
-            raise NotImplementedError
-
-    def get_all_cpds_and_pdf(
-        self, parents: list, uncertainty: torch.Tensor, max_values: int = 10
-    ):
-        unique_values_start = [
-            torch.unique(feature_values)
-            for feature_values in self.parents_data[parents]
-        ]
-
-        unique_values_parents = self.reduce_unique_values_list(
-            unique_values_start, max_values
+        selected_data_by_estimator = self.parameters_estimator.return_data(
+            parents_data_subset, self.node_data, query
         )
 
-        # Compute all possible combinations of unique parent values
-        combinations = torch.cartesian_prod(*unique_values_parents)
-
-        # Get unique values of the target feature (store separately)
-        unique_values_target_feature = self.node_data.unique(sorted=True)
-
-        # Dictionary to store CPDs and parent unique values
-        cpds_dict = {
-            key: torch.zeros((combinations.shape[0],), device=self.device)
-            for n, key in enumerate(parents)  # Store unique values for each parent
-        }
-        cpds_dict[self.node_name] = torch.tensor(
-            unique_values_target_feature.unsqueeze(0).expand(combinations.shape[0], -1),
-            device=self.device,
-        )  # Store unique target feature values
-
-        # **Predefine a list for CPDs** (since distributions are objects)
-        cpds_dict["cpds"] = [None] * combinations.shape[0]  # Pre-allocate list
-
-        # **Predefine a list for CPDs** (since distributions are objects)
-        cpds_dict["pdfs"] = torch.zeros(
-            (combinations.shape[0], len(unique_values_target_feature)),
-            device=self.device,
-        )  # Pre-allocate list
-
-        # cpds_dict["combinations"] = combinations
-
-        # Iterate over each parent value combination
-        for i, comb in tqdm(
-            enumerate(combinations),
-            total=len(combinations),
-            desc="computing all cpds and pdfs...",
-        ):
-            parents_evidence = {}
-            for n, par_value in enumerate(comb):
-                parents_evidence[parents[n]] = (par_value, uncertainty)
-
-                cpds_dict[parents[n]][i] = par_value
-
-            # Get the conditional probability distribution (cpd) for the given parent evidence
-            cpd, _ = self.get_cpd(parents_evidence)
-
-            # Store CPD in the pre-allocated list
-            cpds_dict["cpds"][i] = cpd
-
-            cpds_dict["pdfs"][i, :] = cpd.log_prob(unique_values_target_feature)
-
-        return cpds_dict
-
-    @staticmethod
-    def reduce_unique_values(unique_values_dict, N):
-        """
-        Reduces the number of unique values per feature to at most N while ensuring
-        the selected values cover the full range.
-
-        Args:
-            unique_values_dict (dict): A dictionary where keys are features and
-                                       values are torch.Tensors of unique values.
-            N (int): Maximum number of unique values per feature.
-
-        Returns:
-            dict: A dictionary with at most N values per feature, covering the range.
-        """
-        reduced_dict = {}
-
-        for feature, unique_values in unique_values_dict.items():
-            unique_values = torch.sort(unique_values).values  # Ensure sorted order
-            num_values = unique_values.numel()
-
-            if num_values <= N:
-                reduced_dict[feature] = unique_values
-            else:
-                # Select N well-spread values across the range
-                indices = torch.linspace(0, num_values - 1, steps=N).long()
-                reduced_dict[feature] = unique_values[indices]
-
-        return reduced_dict
-
-    @staticmethod
-    def reduce_unique_values_list(unique_values_list, N):
-        """
-        Reduces the number of unique values in each tensor to at most N, ensuring
-        well-distributed selection across the range.
-
-        Args:
-            unique_values_list (list of torch.Tensor): List of tensors, each containing unique values.
-            N (int): Maximum number of unique values per tensor.
-
-        Returns:
-            list of torch.Tensor: Reduced list with at most N values per tensor.
-        """
-        reduced_list = []
-
-        for unique_values in unique_values_list:
-            unique_values = torch.sort(unique_values).values  # Ensure sorted order
-            num_values = unique_values.numel()
-
-            if num_values <= N:
-                reduced_list.append(unique_values)
-            else:
-                indices = torch.linspace(
-                    0, num_values - 1, steps=N
-                ).long()  # Evenly spaced indices
-                reduced_list.append(unique_values[indices])
-
-        return reduced_list
+        return self.probability_estimator.compute_probability(
+            selected_data_by_estimator
+        ), self.node_data.unique().to(self.device)
 
 
 if __name__ == "__main__":

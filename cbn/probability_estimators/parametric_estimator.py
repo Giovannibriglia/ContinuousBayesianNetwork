@@ -1,10 +1,10 @@
 import torch
 
-from cbn.base.learning_parameters import BaseEstimator
-from cbn.parameters_estimators import distribution_mapping
+from cbn.base.probability_estimator import BaseProbabilityEstimator
+from cbn.probability_estimators import distribution_mapping
 
 
-class ParametricEstimator(BaseEstimator):
+class ParametricEstimator(BaseProbabilityEstimator):
     """Parametric estimator for specific distributions."""
 
     def __init__(self, distribution: str, device: str = "cpu", **kwargs):
@@ -23,7 +23,7 @@ class ParametricEstimator(BaseEstimator):
         # Store the distribution class
         self.distribution_class = self.distribution_mapping[self.distribution_name]
 
-    def compute_parameters(
+    def compute_probability(
         self,
         data: torch.Tensor,
     ) -> torch.distributions.Distribution:

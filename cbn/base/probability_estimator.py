@@ -4,7 +4,7 @@ from typing import Tuple
 import torch
 
 
-class BaseEstimator(ABC):
+class BaseProbabilityEstimator(ABC):
     """
     Base class for parametric and non-parametric estimators.
     """
@@ -13,7 +13,7 @@ class BaseEstimator(ABC):
         self.device = device
 
     @abstractmethod
-    def compute_parameters(
+    def compute_probability(
         self,
         data: torch.Tensor,
     ) -> Tuple[torch.distributions.Distribution, dict]:
