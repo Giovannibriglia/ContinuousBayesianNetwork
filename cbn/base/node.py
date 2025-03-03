@@ -7,10 +7,13 @@ import numpy as np
 import pandas as pd
 import torch
 
+from cbn.base import min_tolerance
 from cbn.base.parameters_estimator import BaseParameterEstimator
 from cbn.base.probability_estimator import BaseProbabilityEstimator
 from cbn.parameters_estimators.mle import MaximumLikelihoodEstimator
-from cbn.probability_estimators.parametric_estimator import ParametricEstimator
+from cbn.probability_estimators.parametric_estimator import (
+    ParametricProbabilityEstimator,
+)
 
 
 class NodeVariable:
@@ -23,7 +26,9 @@ class NodeVariable:
         probability_estimator_config: Dict = None,
     ):
         self.node_name = node_name
+        self.global_index = -1
         self.parents = parents
+        self.n_features_tot = len(parents) + 1
         self.node_data = torch.zeros((1, 0))  # Initially no samples
         self.parents_data = torch.zeros((len(self.parents), 0))
 
@@ -35,6 +40,9 @@ class NodeVariable:
         self.probability_estimator = self._setup_probability_estimator(
             probability_estimator_config
         )
+
+    def set_global_index(self, index):
+        self.global_index = index
 
     def _setup_parameters_estimator(
         self, estimator_config: Dict
@@ -56,18 +64,27 @@ class NodeVariable:
         self, estimator_config
     ) -> BaseProbabilityEstimator:
         if estimator_config is None:
-            return ParametricEstimator("normal", self.device)
+            kwargs = {"min_tolerance": min_tolerance}
+            return ParametricProbabilityEstimator("normal", self.device, **kwargs)
         else:
             estimator_type = estimator_config["type"]
             output_distribution = estimator_config["distribution"]
             kwargs = estimator_config["kwargs"]
 
             if estimator_type == "parametric":
-                return ParametricEstimator(output_distribution, self.device, **kwargs)
+                return ParametricProbabilityEstimator(
+                    output_distribution, self.device, **kwargs
+                )
             elif estimator_type == "non_parametric":
                 raise NotImplementedError
             else:
                 raise ValueError(f"estimator type {estimator_type} is not defined")
+
+    def get_domain(self) -> torch.Tensor:
+        return self.node_data.unique().to(self.device)
+
+    def get_prior(self) -> torch.distributions.Distribution:
+        return self.probability_estimator.compute_probability(self.node_data)
 
     def set_data(
         self,
@@ -136,66 +153,83 @@ class NodeVariable:
 
     def get_cpd(
         self,
-        parents_evidence: Dict[int, Tuple[any, torch.Tensor]],
+        evidence: Dict[int, Tuple[any, torch.Tensor]] = None,
         default_parents_uncertainty: float = 0.1,
-    ) -> [torch.distributions.Distribution, torch.Tensor]:
+    ) -> Tuple[torch.distributions.Distribution, torch.Tensor]:
         """
         Get the CPDs (mean and covariance) of the node based on the parents' evidence.
 
         Args:
-            parents_evidence (Dict[int, Tuple[float, Optional[float]]]): A dictionary mapping parent indices
+            evidence (Dict[int, Tuple[float, Optional[float]]]): A dictionary mapping parent indices
                 to their evidence values and optional uncertainties as (mean, uncertainty). If uncertainty is
                 not provided, the default value will be used.
             default_parents_uncertainty (float): Default uncertainty to use if not specified for a parent.
 
         Returns:
-            torch.distributions.Distribution: The initialized distribution object.
+            Tuple[torch.distributions.Distribution, torch.Tensor]: The initialized distribution object and node data.
         """
-        if not parents_evidence:
-            parents_evidence = {
-                i: (torch.mean(self.parents_data[i]), default_parents_uncertainty)
-                for i in range(len(self.parents))
+
+        if evidence is not None:
+            evidence = evidence.copy()  # Avoid modifying the input dictionary
+
+            # Extract node evidence (if any)
+            target_node_evidence = evidence.pop(self.global_index, None)
+
+            # Extract parent indices and corresponding evidence
+            parent_indices = list(evidence.keys())
+
+            # Extract means and uncertainties for parents
+            means = torch.tensor(
+                [evidence[i][0] for i in parent_indices],
+                dtype=torch.float32,
+                device=self.device,
+            )
+            uncertainties = torch.tensor(
+                [
+                    (
+                        evidence[i][1]
+                        if len(evidence[i]) > 1
+                        else default_parents_uncertainty
+                    )
+                    for i in parent_indices
+                ],
+                dtype=torch.float32,
+                device=self.device,
+            )
+
+            # Stack means and uncertainties for parents into a 2D tensor
+            query_parents = {
+                key: (mean, unc)
+                for key, mean, unc in zip(evidence.keys(), means, uncertainties)
             }
 
-        if max(parents_evidence.keys()) >= len(self.parents):
-            raise ValueError("Evidence keys must align with parent indices")
-
-        # Extract data for relevant parent features
-        parent_indices = list(parents_evidence.keys())
-        parents_data_subset = self.parents_data[
-            parent_indices, :
-        ]  # Shape: (len(evidence), n_samples)
-
-        # Extract means and uncertainties for parents
-        means = torch.tensor(
-            [parents_evidence[i][0] for i in parent_indices],
-            device=self.device,
-        )
-        uncertainties = torch.tensor(
-            [
-                (
-                    parents_evidence[i][1]
-                    if len(parents_evidence[i]) > 1
-                    else default_parents_uncertainty
+            # Handle target node evidence if provided
+            if target_node_evidence is not None:
+                target_mean = torch.tensor(
+                    [target_node_evidence[0]], dtype=torch.float32, device=self.device
                 )
-                for i in parent_indices
-            ],
-            device=self.device,
-        )
+                target_uncertainty = torch.tensor(
+                    (
+                        [target_node_evidence[1]]
+                        if len(target_node_evidence) > 1
+                        else [default_parents_uncertainty]
+                    ),
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+                target_query = torch.stack([target_mean, target_uncertainty], dim=1)
+            else:
+                target_query = None
 
-        """# Debugging: Print information
-        print(f"\nProcessing Node: {self.name}")
-        print(f"Parents Data Subset (for {self.name}): {parents_data_subset}")
-        print(f"Parents Means (for {self.name}): {means}")
-        print(f"Parents Uncertainties (for {self.name}): {uncertainties}")"""
-
-        query = torch.tensor(
-            [(mean, unc) for mean, unc in zip(means, uncertainties)], device=self.device
-        )
-
-        selected_data_by_estimator = self.parameters_estimator.return_data(
-            parents_data_subset, self.node_data, query
-        )
+            # Select data based on evidence
+            selected_data_by_estimator = self.parameters_estimator.return_data(
+                self.node_data, self.parents_data, target_query, query_parents
+            )
+        else:
+            # If no evidence is provided, return all data
+            selected_data_by_estimator = self.parameters_estimator.return_data(
+                self.node_data
+            )
 
         return self.probability_estimator.compute_probability(
             selected_data_by_estimator

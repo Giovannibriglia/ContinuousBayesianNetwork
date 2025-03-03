@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Union
+from typing import Dict, Union
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -9,7 +9,10 @@ import pandas as pd
 import torch
 from torch.distributions import Distribution
 
+from cbn.base import min_tolerance
+from cbn.base.inference import BaseInference
 from cbn.base.node import NodeVariable
+from cbn.inference.exact_inference import ExactInference, VariableElimination
 
 
 class BayesianNetwork:
@@ -43,6 +46,8 @@ class BayesianNetwork:
 
         # Assign data to nodes
         self._assign_data_to_nodes()
+
+        self.inference = self._setup_inference()
 
     def _convert_data_to_tensor(self, data):
         """Converts data to a PyTorch tensor and creates a node-to-column mapping."""
@@ -95,17 +100,35 @@ class BayesianNetwork:
             # print(f"Parents Data (for {node_name}): {parents_data}")
 
             # Assign the node and parent data
+            node.set_global_index(node_idx)
             node.set_data(node_data=node_data, parents_data=parents_data)
 
+    def _setup_inference(self, inference_config: Dict = None) -> BaseInference:
+        if inference_config is None:
+            return ExactInference(self)
+        else:
+            # inference_type = inference_config["type"]
+            inference_technique = inference_config["technique"]
+            kwargs = inference_config["kwargs"]
+
+            if inference_technique == "exact_inference":
+                return ExactInference(self, **kwargs)
+            elif inference_technique == "variable_elimination":
+                return VariableElimination(self, **kwargs)
+            elif inference_technique == "belief_propagation":
+                raise NotImplementedError
+            else:
+                raise ValueError(f"estimator type {inference_technique} is not defined")
+
     def get_cpd_and_pdf(
-        self, node_name: str, parents_evidence: Dict, uncertainty: float = 0.1
-    ):
+        self, node_name: str, evidence: Dict, uncertainty: float = 0.1
+    ) -> [torch.distributions.Distribution, torch.Tensor, torch.Tensor]:
         """
         Infers CPDs for a given node given evidence for its parents.
 
         Args:
             node_name (str): The name of the node.
-            parents_evidence (dict): Evidence for the parents as {parent_name: value}.
+            evidence (dict): Evidence for the parents as {parent_name: value}.
             uncertainty (float): Uncertainty interval for matching evidence.
 
         Returns:
@@ -114,51 +137,62 @@ class BayesianNetwork:
         if node_name not in self.nodes:
             raise ValueError(f"Node {node_name} does not exist.")
 
-        # Convert evidence keys from column names to indices if needed
-        translated_evidence = {
-            self.column_mapping.get(key, key): (
-                value,
-                torch.tensor([uncertainty], device=self.device),
-            )
-            for key, value in parents_evidence.items()
-        }
-
-        # print(
-        # "Translated Evidence:", translated_evidence
-        # )  # Debug: Print the translated evidence
+        translated_evidence = self.translate_evidence(evidence, uncertainty)
 
         # Pass the translated evidence to the node's CPD computation. It returns node_cpds and target_values
-        node_cpd, target_values = self.nodes[node_name].get_cpd(translated_evidence)
+        node_cpd, target_values = self.nodes[node_name].get_cpd(
+            translated_evidence, uncertainty
+        )
         # Compute pdf
         node_pdf = node_cpd.log_prob(target_values)
 
         return node_cpd, node_pdf, target_values
 
-    def get_all_cpds_and_pdfs(
-        self, node_name: str, parents: List, uncertainty: float = 0.1
-    ):
+    def infer(self, node_name: str, parents_evidence: Dict, uncertainty: float = 0.1):
+        translated_evidence = self.translate_evidence(parents_evidence, uncertainty)
 
-        parents_as_numbers = [self.column_mapping[parent] for parent in parents]
-        uncertainty_as_tensor = torch.tensor([uncertainty])
+        return self.inference.infer(node_name, translated_evidence, uncertainty)
 
-        all_cpds = self.nodes[node_name].get_all_cpds_and_pdf(
-            parents_as_numbers, uncertainty_as_tensor
-        )
-
-        renamed_dict = {
-            col_name if key in self.column_mapping.values() else key: value
-            for key, value in all_cpds.items()
-            for col_name, index in self.column_mapping.items()
-            if index == key or key not in self.column_mapping.values()
+    def translate_evidence(self, parents_evidence: Dict, uncertainty: float = None):
+        # Convert evidence keys from column names to indices if needed
+        return {
+            self.column_mapping.get(key, key): (
+                (
+                    value
+                    if isinstance(value, torch.Tensor)
+                    else torch.tensor([value], device=self.device)
+                ),
+                (
+                    (
+                        uncertainty
+                        if isinstance(uncertainty, torch.Tensor)
+                        else torch.tensor([uncertainty], device=self.device)
+                    )
+                    if uncertainty
+                    else min_tolerance
+                ),
+            )
+            for key, value in parents_evidence.items()
         }
-
-        return renamed_dict
 
     def print_bn_structure(self):
         """Prints the structure of the Bayesian Network."""
         for node in self.dag.nodes:
             parents = list(self.dag.predecessors(node))
             print(f"Node: {node}, Parents: {parents}")
+
+    def get_bn_structure(self):
+        """Returns the structure of the Bayesian Network."""
+        return self.dag
+
+    def get_nodes(self):
+        return self.nodes
+
+    def get_domain(self, node_name: str):
+        return self.nodes[node_name].get_domain()
+
+    def get_prior(self, node_name: str):
+        return self.nodes[node_name].get_prior()
 
     @staticmethod
     def plot_cpds(distribution: Distribution, target_values: torch.Tensor):
@@ -218,15 +252,28 @@ if __name__ == "__main__":
     bn = BayesianNetwork(dag=dag, data=data)
 
     # Print the structure
-    bn.print_bn_structure()
+    bn.get_bn_structure()
 
+    target_node = "reward"
     # Infer CPDs for node C given evidence for A and B
     evidence = {
-        "action": torch.tensor([2], device="cuda"),
-        "obs_0": torch.tensor([14.0], device="cuda"),
-    }  # ,
-    cpd, pdf, target_values = bn.get_cpd_and_pdf("reward", evidence, 0)
+        "reward": torch.tensor([1.0], device="cuda"),
+        # "action": torch.tensor([2], device="cuda"),
+        # "obs_0": torch.tensor([14.0], device="cuda"),
+    }
+    cpd, pdf, target_values = bn.get_cpd_and_pdf(target_node, evidence)
     print("Conditional Distribution:", cpd)
     print("PDF: ", pdf)
     print("Target Values: ", target_values)
     bn.plot_cpds(cpd, target_values)
+
+    """p_action, _, _ = bn.get_cpd_and_pdf("action", {})
+    p_obs, _, _ = bn.get_cpd_and_pdf("obs_0", {})
+    p_reward, pdf, target_values = bn.get_cpd_and_pdf(target_node, evidence)
+
+    distr_to_multiply = [p_action, p_obs, p_reward]
+    for d in distr_to_multiply:
+        print(d)
+    final = multiply_distributions(distr_to_multiply)
+
+    print(final)"""

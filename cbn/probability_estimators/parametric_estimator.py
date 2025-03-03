@@ -4,7 +4,7 @@ from cbn.base.probability_estimator import BaseProbabilityEstimator
 from cbn.probability_estimators import distribution_mapping
 
 
-class ParametricEstimator(BaseProbabilityEstimator):
+class ParametricProbabilityEstimator(BaseProbabilityEstimator):
     """Parametric estimator for specific distributions."""
 
     def __init__(self, distribution: str, device: str = "cpu", **kwargs):

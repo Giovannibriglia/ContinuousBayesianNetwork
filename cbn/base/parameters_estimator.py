@@ -13,6 +13,10 @@ class BaseParameterEstimator(ABC):
 
     @abstractmethod
     def return_data(
-        self, parents_data: torch.Tensor, node_data: torch.Tensor, query: torch.Tensor
+        self,
+        node_data: torch.Tensor,
+        parents_data: torch.Tensor = None,
+        query_node: torch.Tensor = None,
+        query_parents: torch.Tensor = None,
     ) -> torch.Tensor:
         raise NotImplementedError
