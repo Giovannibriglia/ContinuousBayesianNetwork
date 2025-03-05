@@ -4,15 +4,25 @@ import torch
 
 
 class BaseProbabilityEstimator(ABC):
-    """
-    Base class for parametric and non-parametric estimators.
-    """
-
     def __init__(self, device: str = "cpu"):
         self.device = device
 
-    @abstractmethod
     def compute_probability(
+        self,
+        data: torch.Tensor,
+    ) -> torch.distributions.Distribution:
+
+        self.check_input(data)
+
+        probabilities = self._compute_probability(data)
+
+        batch_size = data.shape[0]
+        self.check_output(data, batch_size)
+
+        return probabilities
+
+    @abstractmethod
+    def _compute_probability(
         self,
         data: torch.Tensor,
     ) -> torch.distributions.Distribution:
@@ -27,4 +37,12 @@ class BaseProbabilityEstimator(ABC):
                 - The initialized distribution object.
                 - A dictionary of computed parameters for the distribution.
         """
+        raise NotImplementedError
+
+    @abstractmethod
+    def check_output(self, prob, batch_size: int):
+        raise NotImplementedError
+
+    @abstractmethod
+    def check_input(self, data: torch.Tensor):
         raise NotImplementedError
