@@ -1,6 +1,7 @@
 from typing import List
 
 import torch
+from torch.distributions import Normal
 
 
 def get_distribution_parameters(dist: torch.distributions.Distribution):
@@ -110,3 +111,31 @@ def sum_distributions(
 
     else:
         raise NotImplementedError(f"Summation not implemented for {dist_type}")
+
+
+def product_of_n_torch_gaussians(distributions):
+    """
+    Compute the product of N torch.distributions.Normal distributions.
+
+    Args:
+        distributions (list of torch.distributions.Normal): List of N normal distributions.
+
+    Returns:
+        dict: {'mu_C': mu_C, 'sigma_C': sigma_C, 'distribution': Normal(mu_C, sigma_C)}
+    """
+    assert len(distributions) > 0, "Input list must contain at least one distribution."
+
+    # Extract means and standard deviations
+    mu_list = torch.tensor([dist.loc.item() for dist in distributions])
+    sigma_list = torch.tensor([dist.scale.item() for dist in distributions])
+
+    # Compute precision (1/variance) for each Gaussian
+    precision = 1 / (sigma_list**2)
+
+    # Compute the new mean and variance
+    sigma_C_sq = 1 / torch.sum(precision)
+    sigma_C = torch.sqrt(sigma_C_sq)
+    mu_C = torch.sum(mu_list * precision) / torch.sum(precision)
+
+    # Return the new normal distribution
+    return Normal(mu_C, sigma_C)

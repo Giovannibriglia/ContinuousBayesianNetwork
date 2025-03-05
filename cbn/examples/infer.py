@@ -23,11 +23,13 @@ if __name__ == "__main__":
     # Infer CPDs for node C given evidence for A and B
     evidence = {
         # "reward": torch.tensor([[1]], device="cuda"),
-        "action": torch.tensor([2, 3], device="cuda"),
-        "obs_0": torch.tensor([14, 12], device="cuda"),
+        "action": torch.tensor([2], device="cuda"),
+        "obs_0": torch.tensor([14], device="cuda"),
     }
-    cpd, pdf, target_values = bn.get_cpd_and_pdf(target_node, evidence)
-    print("Conditional Distribution:", cpd)
+    output = bn.infer(target_node, evidence, {})
+    print(output)
+
+    """print("Conditional Distribution:", cpd)
     print("PDF: ", pdf)
-    print("Target Values: ", target_values)
+    print("Target Values: ", target_values)"""
     # bn.plot_cpds(cpd, target_values)

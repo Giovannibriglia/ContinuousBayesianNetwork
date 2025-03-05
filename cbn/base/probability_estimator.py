@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import List
 
 import torch
 
@@ -10,7 +11,7 @@ class BaseProbabilityEstimator(ABC):
     def compute_probability(
         self,
         data: torch.Tensor,
-    ) -> torch.distributions.Distribution:
+    ) -> List:
 
         self.check_input(data)
 
@@ -25,7 +26,7 @@ class BaseProbabilityEstimator(ABC):
     def _compute_probability(
         self,
         data: torch.Tensor,
-    ) -> torch.distributions.Distribution:
+    ) -> List:
         """
         Compute the parameters of the distribution based on the input data.
 
