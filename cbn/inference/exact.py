@@ -236,8 +236,6 @@ class ExactInference(BaseInference):
         do: Dict,
         uncertainty: float = initial_uncertainty,
     ):
-        # evidence: torch.Tensor [n_queries, 1]
-
         # Determine batch size
         if evidence:
             first_key = next(iter(evidence))
@@ -251,6 +249,8 @@ class ExactInference(BaseInference):
             points_to_evaluate = (
                 self.bn.get_domain(target_node).unsqueeze(0).expand(n_queries, -1)
             )
+
+        n_points_to_evaluate = points_to_evaluate.shape[1]
 
         nodes = self.bn.get_nodes()
         n_nodes = len(nodes)
@@ -298,6 +298,11 @@ class ExactInference(BaseInference):
 
             # print(f"{node}: {pdf.shape}")
 
-        res = numerator.prod(dim=0)
+        producer_numerator = numerator.prod(dim=0)  # [n_queries, n_points]
+        producer_denominator = denominator.prod(dim=0)  # [n_queries]
+
+        res = producer_numerator / producer_denominator.unsqueeze(-1).expand(
+            n_nodes, n_queries, n_points_to_evaluate
+        )
 
         return res
