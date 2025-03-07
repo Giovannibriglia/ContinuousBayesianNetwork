@@ -74,6 +74,9 @@ A PyTorch-based Bayesian Network framework designed to handle **continuous** dat
 ---
 
 
+## Current problems:
+1. If in the required cpd has conditions where there is no data, error.
+
 ## License
 
 [GNU GENERAL PUBLIC LICENSE](LICENSE)

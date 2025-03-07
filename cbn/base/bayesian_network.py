@@ -6,7 +6,7 @@ import networkx as nx
 import pandas as pd
 import torch
 
-from cbn.base import initial_uncertainty
+from cbn.base import initial_uncertainty, min_tolerance
 from cbn.inference.exact import ExactInference
 from cbn.parameters_learning.mle import MaximumLikelihoodEstimator
 
@@ -83,6 +83,12 @@ class BayesianNetwork:
         else:
             # TODO
             return ExactInference(self, device=self.device)
+
+    def get_nodes(self):
+        return self.nodes
+
+    def get_dag(self):
+        return self.dag
 
     def get_domain(self, node: int | str):
         if isinstance(node, int):
@@ -168,38 +174,35 @@ class BayesianNetwork:
         """
 
         if len(evidence.keys()) > 0:
-            first_key = list(evidence.keys())[0]
+            evidence_features = list(evidence.keys())
+            data_features = [
+                self.column_mapping[feature] for feature in evidence_features
+            ]
 
-            batch_size = evidence[first_key].shape[0]
-            num_evidence_features = len(evidence.keys())
+            n_queries = evidence[evidence_features[0]].shape[0]
+            n_combinations = evidence[evidence_features[0]].shape[1]
+
+            if target_node not in evidence_features:
+                data_features.append(self.column_mapping[target_node])
+                target_node_index = len(data_features) - 1
+            else:
+                target_node_index = evidence_features.index(target_node)
 
             evidence_tensor = torch.zeros(
-                (batch_size, num_evidence_features), device=evidence[first_key].device
+                (n_queries, len(evidence_features), n_combinations)
             )
-            filtered_data = torch.zeros(
-                (num_evidence_features, self.data.shape[1]), device=self.data.device
+            for query_n in range(n_queries):
+                for feat_ev_idx, feat_ev in enumerate(evidence_features):
+                    if feat_ev in evidence.keys():
+                        evidence_tensor[query_n, feat_ev_idx, :] = evidence[feat_ev][
+                            query_n
+                        ]
+
+            filtered_data = (
+                self.data[data_features].unsqueeze(0).expand(n_queries, -1, -1)
             )
-
-            count = 0
-            target_node_index = None
-            for feature_name, feature_values in evidence.items():
-                evidence_tensor[:, count] = feature_values
-                feature_index = self.column_mapping[feature_name]
-                filtered_data[count, :] = self.data[feature_index]
-
-                if feature_name == target_node:
-                    target_node_index = count
-
-                count += 1
-
-            if target_node_index is None:
-                target_node_index = self.column_mapping[target_node]
-                target_node_values = self.data[target_node_index].unsqueeze(0)
-                filtered_data = torch.cat([filtered_data, target_node_values], dim=0)
-                target_node_index = filtered_data.shape[0] - 1
         else:
             target_node_index = 0
-            batch_size = 1
             evidence_tensor = None
             filtered_data = self.data[self.column_mapping[target_node]].unsqueeze(0)
 
@@ -210,38 +213,54 @@ class BayesianNetwork:
         if get_pdf:
             if points_to_evaluate is None:
                 if target_node in evidence.keys():
-                    values_to_evaluate = evidence[target_node]
+                    values_to_evaluate, _ = evidence[target_node].sort()
                 else:
                     values_to_evaluate = self.get_domain(target_node)
             else:
-                values_to_evaluate = points_to_evaluate
+                values_to_evaluate, _ = points_to_evaluate.sort()
 
-            # Compute log probabilities for each batch element
-            pdf = torch.stack(
-                [cpd[b].log_prob(values_to_evaluate) for b in range(batch_size)]
-            )
+            pdf = cpd.log_prob(values_to_evaluate)
+
             if normalize_pdf:
-                if pdf.shape[1] == 1:
-                    return cpd, torch.ones_like(pdf), values_to_evaluate
+                pdf_normalized = self.safe_normalize_pdf(pdf)
 
-                # Normalize log probs in each batch separately
-                min_vals = pdf.min(dim=1, keepdim=True)[0]  # (batch_size, 1)
-                max_vals = pdf.max(dim=1, keepdim=True)[0]  # (batch_size, 1)
+                # Assert that each slice in the last dimension sums to 1
+                assert torch.allclose(
+                    pdf_normalized.sum(dim=-1),
+                    torch.ones_like(pdf_normalized.sum(dim=-1)),
+                    atol=min_tolerance,
+                ), "Normalization failed: Sums are not all 1."
 
-                # Avoid division by zero: If min == max, set normalization to zero
-                denom = max_vals - min_vals
-                denom[denom == 0] = 1  # Prevent division by zero
-
-                normalized_pdf = (
-                    pdf - min_vals
-                ) / denom  # (batch_size, n_values), now in [0, 1]
-
-                return cpd, normalized_pdf, values_to_evaluate
+                return cpd, pdf_normalized, values_to_evaluate
             else:
                 return cpd, pdf, values_to_evaluate
 
         else:
             return cpd, None, None
+
+    @staticmethod
+    def safe_normalize_pdf(
+        pdf: torch.Tensor, epsilon: float = min_tolerance
+    ) -> torch.Tensor:
+        """
+        Safely normalize a PDF along the `n_values` dimension, handling large or negative values.
+
+        Args:
+            pdf (torch.Tensor): Input tensor of shape [n_queries, n_values].
+            epsilon (float): Small value to prevent division by zero.
+
+        Returns:
+            torch.Tensor: Normalized PDF with the sum of each row equal to 1.
+        """
+        # Shift values to avoid extremely large negatives affecting normalization
+        pdf_max = pdf.max(dim=1, keepdim=True).values
+        pdf_shifted = pdf - pdf_max  # Ensure numerical stability
+
+        # Convert to positive values (exponentiate)
+        pdf_exp = torch.exp(pdf_shifted)
+
+        # Normalize
+        return pdf_exp / (pdf_exp.sum(dim=1, keepdim=True) + epsilon)
 
     def infer(
         self,

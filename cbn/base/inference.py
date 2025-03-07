@@ -9,9 +9,6 @@ class BaseInference(ABC):
         self.bn = bn
         self.device = device
 
-        self.dag = self.bn.dag
-        self.nodes = self.dag.nodes
-
     @abstractmethod
     def infer(
         self,
@@ -20,4 +17,12 @@ class BaseInference(ABC):
         do: Dict,
         uncertainty: float = initial_uncertainty,
     ):
+        """
+
+        :param target_node: str
+        :param evidence: Dict, for each feature there is torch.Tensor with shape [n_queries, 1]
+        :param do:
+        :param uncertainty:
+        :return:
+        """
         raise NotImplementedError

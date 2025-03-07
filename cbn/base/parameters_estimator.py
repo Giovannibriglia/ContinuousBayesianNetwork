@@ -42,15 +42,12 @@ class BaseParameterLearning(ABC):
         uncertainty: float = initial_uncertainty,
     ):
         if evidence is not None:
-            batch_size = evidence.shape[0]
-            expanded_data = data.unsqueeze(0).expand(batch_size, -1, -1)
-
             evidence = evidence.to(data.device)
 
             selected_data = self._return_data(
-                expanded_data, target_node_index, evidence, uncertainty
+                data, target_node_index, evidence, uncertainty
             )
-            self._check_selected_data(expanded_data, selected_data)
+            self._check_selected_data(data, selected_data)
         else:
             selected_data = data
 

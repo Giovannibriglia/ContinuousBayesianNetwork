@@ -23,49 +23,51 @@ class MaximumLikelihoodEstimator(BaseParameterLearning):
         uncertainty: float = 0.0,
     ) -> torch.Tensor:
         """
-        Filters the data tensor based on the evidence provided.
+        Filters the `data` tensor based on the `evidence` provided, returning
+        only those samples in the target feature dimension that satisfy
+        the evidence constraints. The output contains exactly `min_len` samples
+        per query to avoid missing values.
 
-        :param data: [batch_size, n_parents_features+1, n_samples]
-        :param target_node_index: index of the target feature
-        :param evidence: [batch_size, n_evidence_features] (may not include all features)
-        :param uncertainty: float
-        :return: torch.Tensor [batch_size, n_selected_samples_from_target_node]
+        :param data: 3D tensor of shape [n_queries, n_features_tot, n_samples]
+        :param target_node_index: int - index of the target feature in the second dimension of `data`
+        :param evidence: 3D tensor of shape [n_queries, n_features_ev, 1],
+                         may not include all features of target_node_index
+        :param uncertainty: float - symmetric margin around each evidence value
+        :return: extracted data of the target_node_index. Shape: [n_queries, n_min_selected_samples]
         """
-        batch_size, n_features, n_samples = data.shape
+        device = data.device
+        n_queries, n_features_tot, n_samples = data.shape
 
         if evidence is None:
-            return data[
-                :, target_node_index, :
-            ]  # No filtering, return all target values
+            return data[:, target_node_index, :]  # [n_queries, n_samples]
 
-        batch_size_evidence, n_evidence_features = evidence.shape
-        assert batch_size == batch_size_evidence, "Evidence and data shapes mismatch"
+        # Create lower & upper bounds for the evidence constraints
+        lower_bound = evidence - uncertainty
+        upper_bound = evidence + uncertainty
 
-        # Reshape evidence for broadcasting
-        evidence_reshaped = evidence.unsqueeze(
-            -1
-        )  # Shape: [batch_size, n_evidence_features, 1]
+        # Extract the relevant evidence features from data
+        evidence_features = data[:, : evidence.shape[1], :]
 
-        # Compute bounds for filtering
-        lower_bound = evidence_reshaped - uncertainty
-        upper_bound = evidence_reshaped + uncertainty
+        # Create a mask for values within the uncertainty bounds
+        mask = (evidence_features >= lower_bound) & (evidence_features <= upper_bound)
+        mask = mask.all(
+            dim=1
+        )  # Reduce across evidence features to ensure all conditions hold
 
-        # Apply condition only on evidence features (excluding the target feature)
-        mask = (data[:, :n_evidence_features, :] >= lower_bound) & (
-            data[:, :n_evidence_features, :] <= upper_bound
+        # Extract the target feature values
+        target_values = data[:, target_node_index, :]
+
+        # Count valid samples per query
+        valid_counts = mask.sum(dim=1)
+        min_len = valid_counts.min().item()
+
+        if min_len == 0:
+            return torch.empty(n_queries, 0, device=device)
+
+        # Select first `min_len` valid samples for each query
+        sorted_indices = torch.argsort(mask.int(), descending=True, dim=1)
+        selected_data = torch.gather(
+            target_values, dim=1, index=sorted_indices[:, :min_len]
         )
 
-        # Reduce along the feature dimension: Keep samples that satisfy **all** conditions
-        mask = mask.all(dim=1)  # Shape: [batch_size, n_samples]
-
-        # Extract selected target values based on mask
-        selected_data = [data[i, target_node_index, mask[i]] for i in range(batch_size)]
-
-        # Pad selected samples to the maximum length for consistent shape
-        max_selected = max(x.shape[0] for x in selected_data) if selected_data else 0
-        selected_data_padded = torch.zeros(batch_size, max_selected, device=data.device)
-
-        for i in range(batch_size):
-            selected_data_padded[i, : selected_data[i].shape[0]] = selected_data[i]
-
-        return selected_data_padded  # Shape: [batch_size, n_selected_samples]
+        return selected_data

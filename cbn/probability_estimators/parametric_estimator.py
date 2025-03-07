@@ -1,5 +1,3 @@
-from typing import List
-
 import torch
 
 from cbn.base.probability_estimator import BaseProbabilityEstimator
@@ -26,113 +24,76 @@ class ParametricProbabilityEstimator(BaseProbabilityEstimator):
         self.distribution_class = self.distribution_mapping[self.distribution_name]
 
     def _compute_probability(
-        self,
-        data: torch.Tensor,
-    ) -> List:
+        self, data: torch.Tensor
+    ) -> torch.distributions.Distribution:
         """
         Compute the parameters for the specified parametric distribution.
 
         Args:
             data (torch.Tensor): The data for which to compute the parameters.
-                                 Shape: [batch_size, n_samples]
+                                 Shape: [n_queries, n_samples]
 
         Returns:
-            list: A list of `torch.distributions.Distribution` objects,
-                  one for each batch instance.
+            A single `torch.distributions.Distribution` object with parameters
+            of shape [n_queries, 1].
         """
         device = data.device  # Use the same device as the input data
-        batch_size = data.shape[0]  # Number of batches
-        distributions = []  # List to store distributions
+        n_queries, _ = data.shape
 
-        # Compute distribution-specific parameters
         if self.distribution_name == "normal":
-            loc = data.mean(dim=1).to(device)  # [batch_size]
+            loc = data.mean(dim=1, keepdim=True).to(device)  # [n_queries, 1]
             scale = torch.clamp(
-                data.std(dim=1, unbiased=False).to(device), min=self.min_tolerance
-            )  # [batch_size]
-            distributions = [
-                torch.distributions.Normal(loc[i], scale[i]) for i in range(batch_size)
-            ]
+                data.std(dim=1, unbiased=False, keepdim=True).to(device),
+                min=self.min_tolerance,
+            )
+            dist = torch.distributions.Normal(loc, scale)
 
         elif self.distribution_name == "beta":
-            mean = data.mean(dim=1)
+            mean = data.mean(dim=1, keepdim=True)  # [n_queries, 1]
             variance = torch.clamp(
-                data.var(dim=1, unbiased=False), min=self.min_tolerance
+                data.var(dim=1, unbiased=False, keepdim=True), min=self.min_tolerance
             )
             common_factor = mean * (1 - mean) / variance - 1
-
             alpha = torch.clamp(mean * common_factor, min=self.min_tolerance)
             beta = torch.clamp((1 - mean) * common_factor, min=self.min_tolerance)
-
-            distributions = [
-                torch.distributions.Beta(alpha[i].to(device), beta[i].to(device))
-                for i in range(batch_size)
-            ]
-
-        elif self.distribution_name == "categorical":
-            unique, counts = torch.unique(data, return_counts=True, dim=1)
-            probs = counts.float() / counts.sum(dim=1, keepdim=True)
-            distributions = [
-                torch.distributions.Categorical(probs=probs[i].to(device))
-                for i in range(batch_size)
-            ]
+            dist = torch.distributions.Beta(alpha.to(device), beta.to(device))
 
         elif self.distribution_name == "uniform":
-            low = data.min(dim=1).values.to(device)
-            high = data.max(dim=1).values.to(device)
-            distributions = [
-                torch.distributions.Uniform(low[i], high[i]) for i in range(batch_size)
-            ]
+            low = data.min(dim=1, keepdim=True).values.to(device)  # [n_queries, 1]
+            high = data.max(dim=1, keepdim=True).values.to(device)  # [n_queries, 1]
+            dist = torch.distributions.Uniform(low, high)
 
         elif self.distribution_name == "gamma":
-            mean = data.mean(dim=1)
+            mean = data.mean(dim=1, keepdim=True)
             variance = torch.clamp(
-                data.var(dim=1, unbiased=False), min=self.min_tolerance
+                data.var(dim=1, unbiased=False, keepdim=True), min=self.min_tolerance
             )
-
             concentration = torch.clamp(mean**2 / variance, min=self.min_tolerance)
             rate = torch.clamp(mean / variance, min=self.min_tolerance)
-
-            distributions = [
-                torch.distributions.Gamma(
-                    concentration[i].to(device), rate[i].to(device)
-                )
-                for i in range(batch_size)
-            ]
+            dist = torch.distributions.Gamma(concentration.to(device), rate.to(device))
 
         elif self.distribution_name == "poisson":
-            rate = torch.clamp(data.mean(dim=1).to(device), min=self.min_tolerance)
-            distributions = [
-                torch.distributions.Poisson(rate[i]) for i in range(batch_size)
-            ]
+            rate = torch.clamp(
+                data.mean(dim=1, keepdim=True), min=self.min_tolerance
+            ).to(device)
+            dist = torch.distributions.Poisson(rate)
 
         elif self.distribution_name == "bernoulli":
-            probs = torch.clamp(
-                data.mean(dim=1).to(device), min=self.min_tolerance, max=1.0
-            )
-            distributions = [
-                torch.distributions.Bernoulli(probs=probs[i]) for i in range(batch_size)
-            ]
+            p = torch.clamp(
+                data.mean(dim=1, keepdim=True), min=self.min_tolerance, max=1.0
+            ).to(device)
+            dist = torch.distributions.Bernoulli(probs=p)
 
         elif self.distribution_name == "exponential":
-            rate = torch.clamp(1 / data.mean(dim=1).to(device), min=self.min_tolerance)
-            distributions = [
-                torch.distributions.Exponential(rate[i]) for i in range(batch_size)
-            ]
-
-        elif self.distribution_name == "dirichlet":
-            concentration = torch.clamp(
-                data.mean(dim=1).to(device), min=self.min_tolerance
-            )
-            distributions = [
-                torch.distributions.Dirichlet(concentration[i])
-                for i in range(batch_size)
-            ]
+            rate = torch.clamp(
+                1.0 / data.mean(dim=1, keepdim=True), min=self.min_tolerance
+            ).to(device)
+            dist = torch.distributions.Exponential(rate)
 
         else:
             raise ValueError(f"Unsupported distribution: {self.distribution_name}")
 
-        return distributions
+        return dist
 
     def check_output(self, prob, batch_size: int):
         """
