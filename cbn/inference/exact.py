@@ -137,7 +137,6 @@ class ExactInference(BaseInference):
         Note: If batch_size > 1, we remove duplicates for each row individually.
               So row 0's duplicates are removed independently of row 1's duplicates, etc.
         """
-        device = next(iter(features_dict.values())).device  # assume all on same device
 
         # Sort features for deterministic order
         feature_names = sorted(features_dict.keys())
@@ -189,9 +188,9 @@ class ExactInference(BaseInference):
             # We'll store them in a single 2D tensor by padding to the max number of unique columns for that feature.
             max_unique_cols = max(row.size(0) for row in row_list)
             # e.g. build shape [batch_size, max_unique_cols]
-            unique_2d = torch.zeros(batch_size, max_unique_cols, device=device)
+            unique_2d = torch.zeros(batch_size, max_unique_cols, device=self.device)
             map_2d = torch.zeros(
-                batch_size, tensor_f.shape[1], dtype=torch.long, device=device
+                batch_size, tensor_f.shape[1], dtype=torch.long, device=self.device
             )
             for b in range(batch_size):
                 n_uniq = row_list[b].numel()
@@ -211,7 +210,7 @@ class ExactInference(BaseInference):
 
         # cartesian_prod on those dimensions
         indices = torch.cartesian_prod(
-            *(torch.arange(nv, device=device) for nv in n_values_list)
+            *(torch.arange(nv, device=self.device) for nv in n_values_list)
         )
         # shape: [total_combinations, n_features]
 
@@ -244,7 +243,7 @@ class ExactInference(BaseInference):
             n_queries = 1
 
         if target_node in evidence:
-            points_to_evaluate = evidence[target_node].unique(sorted=True, dim=0)
+            points_to_evaluate = evidence[target_node]
         else:
             points_to_evaluate = (
                 self.bn.get_domain(target_node).unsqueeze(0).expand(n_queries, -1)
@@ -256,7 +255,7 @@ class ExactInference(BaseInference):
         n_nodes = len(nodes)
 
         numerator = torch.zeros(
-            (n_nodes, n_queries, points_to_evaluate.shape[1]), device="cuda:0"
+            (n_nodes, n_queries, n_points_to_evaluate), device="cuda:0"
         )
         denominator = torch.zeros((n_nodes, n_queries), device="cuda:0")
 
@@ -267,42 +266,55 @@ class ExactInference(BaseInference):
                 for parent in node_parents:
                     if parent in evidence.keys():
                         evidence_for_inference[parent] = evidence[parent]
-                    else:
-                        evidence_for_inference[parent] = self.bn.get_domain(parent)
+                    """else:
+                        evidence_for_inference[parent] = (
+                            self.bn.get_domain(parent)
+                            .unsqueeze(0)
+                            .expand(n_queries, -1)
+                        )"""
 
-            """if node == target_node:
+            """else:
                 if node in evidence.keys():
-                    evidence_for_inference[node] = evidence[node]
-                else:
-                    evidence_for_inference[node] = self.bn.get_domain(node)
-            else:
-                evidence_for_inference[node] = self.bn.get_domain(node)"""
+                    evidence_for_inference[node] = evidence[node]"""
+
+            """else:
+                            evidence_for_inference[node] = self.bn.get_domain(node).expand(
+                                n_queries, -1
+                            )"""
 
             if len(evidence_for_inference.keys()) > 1:
                 all_combinations_for_evidence = self.cartesian_product_features(
                     evidence_for_inference
                 )
+            elif len(evidence_for_inference.keys()) == 1:
+                all_combinations_for_evidence = evidence_for_inference
             else:
                 all_combinations_for_evidence = {}
 
             _, pdf, _ = self.bn.get_cpd_and_pdf(
                 node,
                 all_combinations_for_evidence,
-                points_to_evaluate=points_to_evaluate if node == target_node else None,
+                points_to_evaluate=(
+                    points_to_evaluate if node == target_node else None
+                ),
             )
 
             summed_pdf = pdf.sum(-1)
-            # print(node, pdf)
             numerator[node_idx] = pdf if node == target_node else summed_pdf
             denominator[node_idx] = summed_pdf
-
-            # print(f"{node}: {pdf.shape}")
 
         producer_numerator = numerator.prod(dim=0)  # [n_queries, n_points]
         producer_denominator = denominator.prod(dim=0)  # [n_queries]
 
-        res = producer_numerator / producer_denominator.unsqueeze(-1).expand(
-            n_nodes, n_queries, n_points_to_evaluate
+        """res = producer_numerator / producer_denominator.unsqueeze(-1).expand(
+            -1, n_points_to_evaluate
+        )"""
+
+        result = torch.where(
+            producer_denominator.unsqueeze(-1).expand(-1, n_points_to_evaluate) == 0,
+            torch.tensor(0.0, device=producer_denominator.device),  # Replace 0/0 with 0
+            producer_numerator
+            / producer_denominator.unsqueeze(-1).expand(-1, n_points_to_evaluate),
         )
 
-        return res
+        return result, points_to_evaluate

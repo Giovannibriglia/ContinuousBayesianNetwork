@@ -160,13 +160,13 @@ class BayesianNetwork:
         target_node: str,
         evidence: Dict,
         uncertainty: float = initial_uncertainty,
-        get_pdf: bool = True,
         normalize_pdf: bool = True,
         points_to_evaluate: torch.Tensor = None,
     ):
         """
 
-        :param get_pdf:
+        :param points_to_evaluate:
+        :param normalize_pdf:
         :param target_node:
         :param evidence: {"feat": torch.Tensor with shape [batch_size]
         :param uncertainty: float
@@ -203,6 +203,9 @@ class BayesianNetwork:
             )
         else:
             target_node_index = 0
+            n_queries = (
+                points_to_evaluate.shape[0] if points_to_evaluate is not None else 1
+            )
             evidence_tensor = None
             filtered_data = self.data[self.column_mapping[target_node]].unsqueeze(0)
 
@@ -210,33 +213,63 @@ class BayesianNetwork:
             target_node_index, evidence_tensor, filtered_data, uncertainty
         )
 
-        if get_pdf:
+        node_domain = self.get_domain(target_node).unsqueeze(0).expand(n_queries, -1)
+        pdf = cpd.log_prob(node_domain)
+
+        if normalize_pdf:
+            pdf_normalized = self.safe_normalize_pdf(pdf)
+
+            # Assert that each slice in the last dimension sums to 1
+            assert torch.allclose(
+                pdf_normalized.sum(dim=-1),
+                torch.ones_like(pdf_normalized.sum(dim=-1)),
+                atol=min_tolerance,
+            ), "Normalization failed: Sums are not all 1."
+
             if points_to_evaluate is None:
                 if target_node in evidence.keys():
-                    values_to_evaluate, _ = evidence[target_node].sort()
+                    values_to_evaluate, _ = evidence[
+                        target_node
+                    ].sort()  # [n_queries, n_values]
+                    print("1")
                 else:
-                    values_to_evaluate = self.get_domain(target_node)
+                    values_to_evaluate = node_domain.expand(
+                        n_queries, -1
+                    )  # [n_queries, n_values]
+                    print("2")
             else:
-                values_to_evaluate, _ = points_to_evaluate.sort()
+                values_to_evaluate, _ = (
+                    points_to_evaluate.sort()
+                )  # [n_queries, n_values]
+                print("3")
 
-            pdf = cpd.log_prob(values_to_evaluate)
+            if not torch.equal(node_domain, values_to_evaluate):
+                # node_domain shape [n_queries, n_tot_values]
+                # values_to_evaluate [n_queries, n_values]
 
-            if normalize_pdf:
-                pdf_normalized = self.safe_normalize_pdf(pdf)
+                # Find indices where node_domain == values_to_evaluate
+                indices = torch.zeros_like(values_to_evaluate, dtype=torch.long)
 
-                # Assert that each slice in the last dimension sums to 1
-                assert torch.allclose(
-                    pdf_normalized.sum(dim=-1),
-                    torch.ones_like(pdf_normalized.sum(dim=-1)),
-                    atol=min_tolerance,
-                ), "Normalization failed: Sums are not all 1."
+                for i in range(n_queries):
+                    indices[i] = torch.where(
+                        node_domain[i].unsqueeze(0)
+                        == values_to_evaluate[i].unsqueeze(1)
+                    )[1]
 
-                return cpd, pdf_normalized, values_to_evaluate
-            else:
-                return cpd, pdf, values_to_evaluate
+                # Gather the corresponding pdf values
+                pdf_normalized = torch.gather(
+                    pdf_normalized, 1, indices
+                )  # [n_queries, n_values]
 
+            assert (
+                pdf_normalized.dim() == 2
+                and pdf_normalized.shape == values_to_evaluate.shape
+            ), ValueError(
+                f"pdf of {target_node} has shape: {pdf_normalized.shape}, it should be: {values_to_evaluate.shape}"
+            )
+            return cpd, pdf_normalized, values_to_evaluate
         else:
-            return cpd, None, None
+            return cpd, pdf, node_domain
 
     @staticmethod
     def safe_normalize_pdf(
