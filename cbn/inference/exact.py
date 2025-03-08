@@ -262,6 +262,7 @@ class ExactInference(BaseInference):
         for node_idx, node in enumerate(nodes):
             evidence_for_inference = {}
             node_parents = self.bn.get_parents(node)
+            node_children = self.bn.get_children(node)
             if len(node_parents) > 0:
                 for parent in node_parents:
                     if parent in evidence.keys():
@@ -272,6 +273,11 @@ class ExactInference(BaseInference):
                             .unsqueeze(0)
                             .expand(n_queries, -1)
                         )"""
+
+            if len(node_children) > 0:
+                for child in node_children:
+                    if child in evidence.keys():
+                        evidence_for_inference[child] = evidence[child]
 
             """else:
                 if node in evidence.keys():
@@ -299,9 +305,18 @@ class ExactInference(BaseInference):
                 ),
             )
 
+            # node_children = self.bn.get_children(target_node)
+
             summed_pdf = pdf.sum(-1)
-            numerator[node_idx] = pdf if node == target_node else summed_pdf
             denominator[node_idx] = summed_pdf
+            if node in node_children:
+                summed_pdf = summed_pdf.unsqueeze(-1).expand(-1, n_points_to_evaluate)
+                print(node, pdf.shape, n_points_to_evaluate)
+                numerator[node_idx] = pdf if node == target_node else summed_pdf
+            else:
+                summed_pdf = summed_pdf.unsqueeze(-1).expand(-1, n_points_to_evaluate)
+                print(node, pdf.shape, n_points_to_evaluate)
+                numerator[node_idx] = pdf if node == target_node else summed_pdf
 
         producer_numerator = numerator.prod(dim=0)  # [n_queries, n_points]
         producer_denominator = denominator.prod(dim=0)  # [n_queries]

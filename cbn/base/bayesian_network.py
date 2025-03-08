@@ -302,4 +302,11 @@ class BayesianNetwork:
         do: Dict,
         uncertainty: float = initial_uncertainty,
     ):
+        if evidence != {}:
+            evidence_features = list(evidence.keys())
+            if len(evidence_features) == 1 and target_node in evidence_features:
+                raise ValueError(
+                    f"Inferring {target_node} with only the evidence of it, is unuseful."
+                )
+
         return self.inference.infer(target_node, evidence, do, uncertainty)
