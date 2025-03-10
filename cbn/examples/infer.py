@@ -19,14 +19,16 @@ if __name__ == "__main__":
     # Print the structure
     # bn.get_bn_structure()
 
-    target_node = "obs_0"
+    target_node = "reward"
     # Infer CPDs for node C given evidence for A and B
     evidence = {
-        "reward": torch.tensor([[1], [1], [0]], device="cuda"),
-        "action": torch.tensor([[2], [2], [2]], device="cuda"),
-        # "obs_0": torch.tensor([[14], [14], [3]], device="cuda"),
+        # "reward": torch.tensor([[1], [1], [0]], device="cuda"),
+        "action": torch.tensor([[2], [1], [2]], device="cuda"),
+        "obs_0": torch.tensor([[14], [1], [3]], device="cuda"),
     }
-    prob, domain = bn.infer(target_node, evidence, {})
+    prob, domain_values = bn.infer(target_node, evidence, plot_prob=False)
     print("Probabilities: ", prob)
-    print("Domains values: ", domain)
-    print(prob.shape, domain.shape)
+    print("Domains: ", domain_values)
+    print("Shapes: ", prob.shape, domain_values.shape)
+
+    bn.plot_prob(prob, domain_values, title="Inference Output")

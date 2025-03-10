@@ -5,6 +5,7 @@ from typing import Dict
 import networkx as nx
 import pandas as pd
 import torch
+from matplotlib import pyplot as plt
 
 from cbn.base import initial_uncertainty, min_tolerance
 from cbn.inference.exact import ExactInference
@@ -217,7 +218,7 @@ class BayesianNetwork:
         pdf = cpd.log_prob(node_domain)
 
         if normalize_pdf:
-            pdf_normalized = self.safe_normalize_pdf(pdf)
+            pdf_normalized = self._safe_normalize_pdf(pdf)
 
             # Assert that each slice in the last dimension sums to 1
             assert torch.allclose(
@@ -231,17 +232,17 @@ class BayesianNetwork:
                     values_to_evaluate, _ = evidence[
                         target_node
                     ].sort()  # [n_queries, n_values]
-                    print("1")
+                    # print("1")
                 else:
                     values_to_evaluate = node_domain.expand(
                         n_queries, -1
                     )  # [n_queries, n_values]
-                    print("2")
+                    # print("2")
             else:
                 values_to_evaluate, _ = (
                     points_to_evaluate.sort()
                 )  # [n_queries, n_values]
-                print("3")
+                # print("3")
 
             if not torch.equal(node_domain, values_to_evaluate):
                 # node_domain shape [n_queries, n_tot_values]
@@ -272,7 +273,7 @@ class BayesianNetwork:
             return cpd, pdf, node_domain
 
     @staticmethod
-    def safe_normalize_pdf(
+    def _safe_normalize_pdf(
         pdf: torch.Tensor, epsilon: float = min_tolerance
     ) -> torch.Tensor:
         """
@@ -299,8 +300,9 @@ class BayesianNetwork:
         self,
         target_node: str,
         evidence: Dict,
-        do: Dict,
+        do: Dict = None,
         uncertainty: float = initial_uncertainty,
+        plot_prob: bool = False,
     ):
         if evidence != {}:
             evidence_features = list(evidence.keys())
@@ -309,4 +311,39 @@ class BayesianNetwork:
                     f"Inferring {target_node} with only the evidence of it, is unuseful."
                 )
 
-        return self.inference.infer(target_node, evidence, do, uncertainty)
+        return self.inference.infer(target_node, evidence, do, uncertainty, plot_prob)
+
+    @staticmethod
+    def plot_prob(
+        prob: torch.Tensor, points: torch.Tensor, fontsize: int = 16, title: str = None
+    ):
+        """
+        Plot conditional probability distributions.
+        :param prob: torch.Tensor. Shape [n_queries, n_values].
+        :param points: torch.Tensor. Shape [n_queries, n_values].
+        :return:
+        """
+
+        plt.figure(dpi=500, figsize=(12, 7))
+        plt.title(title, fontsize=fontsize + 4)
+        prob = prob.cpu().numpy()
+        points = points.cpu().numpy()
+
+        for query_n in range(prob.shape[0]):
+            plt.plot(
+                points[query_n, :],
+                prob[query_n, :],
+                label=f"Query #{query_n}",
+                linewidth=4,
+            )
+
+        plt.xticks(fontsize=fontsize)
+        plt.yticks(fontsize=fontsize)
+        plt.xlabel("Domain", fontsize=fontsize)
+        plt.ylabel("Probability", fontsize=fontsize)
+
+        plt.ylim(ymin=-0.00001, ymax=1.00001)
+        plt.legend(loc="best", fontsize=fontsize)
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
