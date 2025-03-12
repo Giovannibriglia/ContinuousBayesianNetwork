@@ -268,37 +268,29 @@ class ExactInference(BaseInference):
                 for parent in node_parents:
                     if parent in evidence.keys():
                         evidence_for_inference[parent] = evidence[parent]
-                    """else:
-                        evidence_for_inference[parent] = (
-                            self.bn.get_domain(parent)
-                            .unsqueeze(0)
-                            .expand(n_queries, -1)
-                        )"""
+
+            """if node in evidence.keys():
+                evidence_for_inference[node] = evidence[node]"""
 
             if len(node_children) > 0:
-                # TODO: pending issue. Check the correctness
+                # TODO: perhaps pending issue. Check the correctness
                 for child in node_children:
                     if child in evidence.keys():
                         evidence_for_inference[child] = evidence[child]
 
-            """else:
-                if node in evidence.keys():
-                    evidence_for_inference[node] = evidence[node]"""
-
-            """else:
-                            evidence_for_inference[node] = self.bn.get_domain(node).expand(
-                                n_queries, -1
-                            )"""
-
             if len(evidence_for_inference.keys()) > 1:
+                # print("1")
                 all_combinations_for_evidence = self.cartesian_product_features(
                     evidence_for_inference
                 )
             elif len(evidence_for_inference.keys()) == 1:
+                # print("2")
                 all_combinations_for_evidence = evidence_for_inference
             else:
+                # print("3")
                 all_combinations_for_evidence = {}
 
+            # print(f"All combinations for {node}: ", all_combinations_for_evidence)
             _, pdf, domain_values = self.bn.get_cpd_and_pdf(
                 node,
                 all_combinations_for_evidence,
