@@ -64,6 +64,7 @@ class BaseParameterLearning(ABC):
         target_node_index: int,
         evidence: torch.Tensor = None,
         uncertainty: float = initial_uncertainty,
+        chunk_size: int = 1024,
     ) -> torch.Tensor:
         raise NotImplementedError
 

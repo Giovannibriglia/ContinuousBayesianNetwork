@@ -10,6 +10,7 @@ from matplotlib import pyplot as plt
 from cbn.base import initial_uncertainty, min_tolerance
 from cbn.inference.exact import ExactInference
 from cbn.parameters_learning.mle import MaximumLikelihoodEstimator
+from cbn.utils import uniform_sample_tensor
 
 
 class BayesianNetwork:
@@ -163,9 +164,11 @@ class BayesianNetwork:
         uncertainty: float = initial_uncertainty,
         normalize_pdf: bool = True,
         points_to_evaluate: torch.Tensor = None,
+        N_max: int = None,
     ):
         """
 
+        :param N_max:
         :param points_to_evaluate:
         :param normalize_pdf:
         :param target_node:
@@ -214,7 +217,9 @@ class BayesianNetwork:
             target_node_index, evidence_tensor, filtered_data, uncertainty
         )
 
-        node_domain = self.get_domain(target_node).unsqueeze(0).expand(n_queries, -1)
+        node_domain = uniform_sample_tensor(
+            self.get_domain(target_node).unsqueeze(0).expand(n_queries, -1), N_max
+        )
         pdf = cpd.log_prob(node_domain)
 
         if normalize_pdf:
@@ -303,15 +308,18 @@ class BayesianNetwork:
         do: Dict = None,
         uncertainty: float = initial_uncertainty,
         plot_prob: bool = False,
+        N_max: int = None,
     ):
         if evidence != {}:
             evidence_features = list(evidence.keys())
-            if len(evidence_features) == 1 and target_node in evidence_features:
+            if target_node in evidence_features:
                 raise ValueError(
-                    f"Inferring {target_node} with only the evidence of it, is unuseful."
+                    f"Cannot infer '{target_node}' because it is already provided as evidence."
                 )
 
-        return self.inference.infer(target_node, evidence, do, uncertainty, plot_prob)
+        return self.inference.infer(
+            target_node, evidence, do, uncertainty, plot_prob, N_max
+        )
 
     @staticmethod
     def plot_prob(

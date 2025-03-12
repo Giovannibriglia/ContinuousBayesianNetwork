@@ -19,6 +19,7 @@ class BaseInference(ABC):
         do: Dict,
         uncertainty: float = initial_uncertainty,
         plot_prob: bool = False,
+        N_max: int = None,
     ):
         raise NotImplementedError
 
@@ -29,6 +30,7 @@ class BaseInference(ABC):
         do: Dict,
         uncertainty: float = initial_uncertainty,
         plot_prob: bool = False,
+        N_max: int = None,
     ):
         """
 
@@ -52,9 +54,11 @@ class BaseInference(ABC):
             points_to_evaluate = (
                 self.bn.get_domain(target_node).unsqueeze(0).expand(n_queries, -1)
             )
-        n_points_to_evaluate = points_to_evaluate.shape[1]
+        n_points_to_evaluate = min(N_max, points_to_evaluate.shape[1])
 
-        output, points = self._infer(target_node, evidence, do, uncertainty, plot_prob)
+        output, points = self._infer(
+            target_node, evidence, do, uncertainty, plot_prob, N_max
+        )
         self._check_output(output, points, n_queries, n_points_to_evaluate)
 
         return output, points
