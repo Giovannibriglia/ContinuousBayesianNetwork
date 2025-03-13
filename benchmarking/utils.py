@@ -1,5 +1,6 @@
 import time
 from datetime import datetime
+from typing import List, Tuple
 
 import gymnasium as gym
 import networkx as nx
@@ -11,7 +12,6 @@ import torch
 from scipy.stats import t
 from sklearn.metrics import (
     accuracy_score,
-    confusion_matrix,
     f1_score,
     mean_absolute_error,
     mean_absolute_percentage_error,
@@ -167,133 +167,39 @@ def discretize_dataframe(df: pd.DataFrame, N: int) -> pd.DataFrame:
     return discretized_df
 
 
-def print_metrics(y_pred, y_true, if_discrete: bool):
-    """
-    Prints metrics for classification or regression based on the data type and distribution.
+def compute_confidence_interval(y_true, y_pred, confidence: float = 0.95):
+    # Ensure no division by zero
+    epsilon = 1e-12  # Small constant to avoid division by zero
+    y_true_safe = np.where(y_true == 0, epsilon, y_true)
 
-    Args:
-        y_pred (torch.Tensor or numpy.ndarray): Predicted values
-        y_true (torch.Tensor or numpy.ndarray): Ground truth values
-        if_discrete (bool): if discrete or continuous problem
-    """
+    # Calculate MAPE errors
+    errors = np.abs((y_true - y_pred) / y_true_safe) * 10
 
-    def compute_confidence_interval(y_true, y_pred, confidence: float = 0.95):
-        # Ensure no division by zero
-        epsilon = 1e-12  # Small constant to avoid division by zero
-        y_true_safe = np.where(y_true == 0, epsilon, y_true)
+    # Calculate the mean and standard error of the errors
+    mean_error = np.mean(errors)
+    std_error = np.std(errors, ddof=1) / np.sqrt(len(errors))
 
-        # Calculate MAPE errors
-        errors = np.abs((y_true - y_pred) / y_true_safe) * 10
+    dof = len(errors) - 1  # Degrees of freedom
+    t_critical = t.ppf((1 + confidence) / 2, dof)  # Two-tailed t critical value
 
-        # Calculate the mean and standard error of the errors
-        mean_error = np.mean(errors)
-        std_error = np.std(errors, ddof=1) / np.sqrt(len(errors))
+    # Margin of error
+    margin_of_error = t_critical * std_error
 
-        dof = len(errors) - 1  # Degrees of freedom
-        t_critical = t.ppf((1 + confidence) / 2, dof)  # Two-tailed t critical value
+    # Confidence interval
+    lower_bound = mean_error - margin_of_error
+    upper_bound = mean_error + margin_of_error
 
-        # Margin of error
-        margin_of_error = t_critical * std_error
-
-        # Confidence interval
-        lower_bound = mean_error - margin_of_error
-        upper_bound = mean_error + margin_of_error
-
-        return lower_bound, upper_bound, margin_of_error
-
-    # Convert tensors to numpy arrays if necessary
-    if isinstance(y_pred, torch.Tensor):
-        y_pred = y_pred.cpu().detach().numpy()
-    if isinstance(y_true, torch.Tensor):
-        y_true = y_true.cpu().detach().numpy()
-
-    # Ensure both are 1D or 2D arrays
-    y_pred = np.array(y_pred)
-    y_true = np.array(y_true)
-
-    # Flatten arrays if needed
-    y_pred = y_pred.flatten() if y_pred.ndim > 1 else y_pred
-    y_true = y_true.flatten() if y_true.ndim > 1 else y_true
-
-    if not if_discrete:
-        # Continuous case: Regression metrics
-        mae = mean_absolute_error(y_true, y_pred)
-        mse = mean_squared_error(y_true, y_pred)
-        r2 = r2_score(y_true, y_pred)
-        mape = mean_absolute_percentage_error(y_true, y_pred)
-        smape = np.mean(
-            2.0 * np.abs(y_true - y_pred) / (np.abs(y_true) + np.abs(y_pred))
-        )
-        nrmse = np.sqrt(mse) / (np.max(y_true) - np.min(y_true))
-        rae = np.sum(np.abs(y_true - y_pred)) / np.sum(np.abs(y_true - np.mean(y_true)))
-
-        confidence = 0.95
-        ci_lower, ci_upper, marginal_error = compute_confidence_interval(
-            y_true, y_pred, confidence
-        )
-
-        print("Regression Metrics:")
-        print(f"  Mean Absolute Error (MAE): {mae:.4f}")
-        print(f"  Mean Squared Error (MSE): {mse:.4f}")
-        print(f"  R-squared (R^2): {r2:.4f}")
-        print(f"  Mean Absolute Percentage Error (MAPE): {mape:.4f}")
-        print(f"  Symmetric Mean Absolute Percentage Error (SMAPE): {smape:.4f}")
-        print(f"  Normalized Root Mean Square Error (NRMSE): {nrmse:.4f}")
-        print(f"  Relative Absolute Error (RAE): {rae:.4f}")
-        """print(
-            f"  Marginal error: {marginal_error} - confidence Interval for {confidence*100:.2f}%: ({ci_lower*100:.2f}%, {ci_upper*100:.2f}%)"
-        )"""
-    else:
-        # Discrete case: Classification metrics
-        if y_pred.ndim > 1 and y_pred.shape[1] > 1:
-            # Multi-class case
-            y_pred = np.argmax(y_pred, axis=1)
-        else:
-            # Binary classification case
-            y_pred = (y_pred >= 0.5).astype(int)
-
-        y_true = y_true.astype(int)
-
-        acc = accuracy_score(y_true, y_pred)
-
-        if len(np.unique(y_true)) == 2 and len(np.unique(y_pred)) == 2:
-            # Binary classification metrics
-            precision = precision_score(y_true, y_pred, zero_division=0)
-            recall = recall_score(y_true, y_pred)
-            f1 = f1_score(y_true, y_pred)
-            conf_matrix = confusion_matrix(y_true, y_pred)
-
-            print("Binary Classification Metrics:")
-            print(f"  Accuracy: {acc:.4f}")
-            print(f"  Precision: {precision:.4f}")
-            print(f"  Recall: {recall:.4f}")
-            print(f"  F1 Score: {f1:.4f}")
-            print(f"  Confusion Matrix:\n{conf_matrix}")
-        else:
-            # Multi-class metrics
-            precision_micro = precision_score(y_true, y_pred, average="micro")
-            recall_micro = recall_score(y_true, y_pred, average="micro")
-            f1_micro = f1_score(y_true, y_pred, average="micro")
-
-            precision_macro = precision_score(y_true, y_pred, average="macro")
-            recall_macro = recall_score(y_true, y_pred, average="macro")
-            f1_macro = f1_score(y_true, y_pred, average="macro")
-
-            conf_matrix = confusion_matrix(y_true, y_pred)
-
-            print("Multi-class Classification Metrics:")
-            print(f"  Accuracy: {acc:.4f}")
-            print(f"  Micro Precision: {precision_micro:.4f}")
-            print(f"  Micro Recall: {recall_micro:.4f}")
-            print(f"  Micro F1 Score: {f1_micro:.4f}")
-            print(f"  Macro Precision: {precision_macro:.4f}")
-            print(f"  Macro Recall: {recall_macro:.4f}")
-            print(f"  Macro F1 Score: {f1_macro:.4f}")
-            print(f"  Confusion Matrix:\n{conf_matrix}")
+    return lower_bound, upper_bound
 
 
 def report_metrics_as_latex(
-    task_name, y_pred, y_true, if_discrete, computation_time, file_path="report.txt"
+    task_name,
+    y_pred,
+    y_true,
+    if_discrete,
+    computation_time,
+    file_path="report.txt",
+    confidence_interval: float = 0.95,
 ):
     """
     Reports metrics for each task and saves them in LaTeX table format.
@@ -305,6 +211,7 @@ def report_metrics_as_latex(
         if_discrete (bool): If discrete or continuous problem.
         computation_time (float): Time taken for inference in seconds.
         file_path (str): Path to save the report.
+        confidence_interval (float): confidence interval.
     """
     # Compute metrics
     metrics = {}
@@ -314,6 +221,9 @@ def report_metrics_as_latex(
         metrics["MSE"] = mean_squared_error(y_true, y_pred)
         metrics["R2"] = r2_score(y_true, y_pred)
         metrics["MAPE"] = mean_absolute_percentage_error(y_true, y_pred)
+        metrics[f"conf_int_{int(confidence_interval * 100)}"] = (
+            compute_confidence_interval(y_true, y_pred, confidence_interval)
+        )
     else:
         # Discrete case: Classification metrics
 
@@ -345,7 +255,10 @@ def report_metrics_as_latex(
     )
     latex_table += "Metric & Value \\\\\n\\hline\n"
     for metric, value in metrics.items():
-        latex_table += f"{metric} & {value:.4f} \\\\\n"
+        if isinstance(value, tuple):
+            latex_table += f"{metric} & {[v.item() for v in value]} \\\\\n"
+        else:
+            latex_table += f"{metric} & {value:.4f} \\\\\n"
     latex_table += (
         "\\hline\n\\end{tabular}\n\\caption{" + task_name + "}\n\\end{table}\n"
     )
@@ -357,7 +270,7 @@ def report_metrics_as_latex(
         f.write("\n\n")
 
 
-def define_dag(df: pd.DataFrame, target_feature: str):
+def define_dag(df: pd.DataFrame, target_feature: str) -> Tuple[nx.DiGraph, List, List]:
 
     observation_features = [s for s in df.columns if "obs" in s]
     intervention_features = [s for s in df.columns if "action" in s]
