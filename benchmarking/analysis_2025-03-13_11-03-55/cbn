@@ -1,0 +1,188 @@
+
+Task: CartPole-v1
+\begin{{table}}[h!]
+\centering
+\begin{{tabular}}{{|c|c|}}
+\hline
+Metric & Value \\
+\hline
+MAE & 0.0000 \\
+MSE & 0.0000 \\
+R2 & 1.0000 \\
+MAPE & 0.0000 \\
+Computation Time (s) & 125.1818 \\
+\hline
+\end{tabular}
+\caption{CartPole-v1}
+\end{table}
+
+
+
+Task: Pendulum-v1
+\begin{{table}}[h!]
+\centering
+\begin{{tabular}}{{|c|c|}}
+\hline
+Metric & Value \\
+\hline
+MAE & 0.0648 \\
+MSE & 0.0137 \\
+R2 & 0.9989 \\
+MAPE & 0.0292 \\
+Computation Time (s) & 102.7482 \\
+\hline
+\end{tabular}
+\caption{Pendulum-v1}
+\end{table}
+
+
+
+Task: Acrobot-v1
+\begin{{table}}[h!]
+\centering
+\begin{{tabular}}{{|c|c|}}
+\hline
+Metric & Value \\
+\hline
+MAE & 0.0000 \\
+MSE & 0.0000 \\
+R2 & 1.0000 \\
+MAPE & 0.0000 \\
+Computation Time (s) & 153.1751 \\
+\hline
+\end{tabular}
+\caption{Acrobot-v1}
+\end{table}
+
+
+
+Task: LunarLander-v3
+\begin{{table}}[h!]
+\centering
+\begin{{tabular}}{{|c|c|}}
+\hline
+Metric & Value \\
+\hline
+MAE & 0.2981 \\
+MSE & 6.0321 \\
+R2 & 0.9514 \\
+MAPE & 0.1383 \\
+Computation Time (s) & 184.6069 \\
+\hline
+\end{tabular}
+\caption{LunarLander-v3}
+\end{table}
+
+
+
+Task: LunarLanderContinuous-v3
+\begin{{table}}[h!]
+\centering
+\begin{{tabular}}{{|c|c|}}
+\hline
+Metric & Value \\
+\hline
+MAE & 0.2319 \\
+MSE & 3.4680 \\
+R2 & 0.9660 \\
+MAPE & 0.0671 \\
+Computation Time (s) & 198.0448 \\
+\hline
+\end{tabular}
+\caption{LunarLanderContinuous-v3}
+\end{table}
+
+
+
+Task: BipedalWalker-v3
+\begin{{table}}[h!]
+\centering
+\begin{{tabular}}{{|c|c|}}
+\hline
+Metric & Value \\
+\hline
+MAE & 0.0042 \\
+MSE & 0.0003 \\
+R2 & 1.0000 \\
+MAPE & 0.1227 \\
+Computation Time (s) & 474.8928 \\
+\hline
+\end{tabular}
+\caption{BipedalWalker-v3}
+\end{table}
+
+
+
+Task: BipedalWalkerHardcore-v3
+\begin{{table}}[h!]
+\centering
+\begin{{tabular}}{{|c|c|}}
+\hline
+Metric & Value \\
+\hline
+MAE & 0.0043 \\
+MSE & 0.0003 \\
+R2 & 1.0000 \\
+MAPE & 0.4101 \\
+Computation Time (s) & 473.9018 \\
+\hline
+\end{tabular}
+\caption{BipedalWalkerHardcore-v3}
+\end{table}
+
+
+
+Task: Blackjack-v1
+\begin{{table}}[h!]
+\centering
+\begin{{tabular}}{{|c|c|}}
+\hline
+Metric & Value \\
+\hline
+MAE & 0.6703 \\
+MSE & 1.1231 \\
+R2 & -0.7882 \\
+MAPE & 451701650808759.3125 \\
+Computation Time (s) & 0.3637 \\
+\hline
+\end{tabular}
+\caption{Blackjack-v1}
+\end{table}
+
+
+
+Task: FrozenLake-v1
+\begin{{table}}[h!]
+\centering
+\begin{{tabular}}{{|c|c|}}
+\hline
+Metric & Value \\
+\hline
+Accuracy & 1.0000 \\
+Precision & 1.0000 \\
+Recall & 1.0000 \\
+F1 & 1.0000 \\
+Computation Time (s) & 0.0109 \\
+\hline
+\end{tabular}
+\caption{FrozenLake-v1}
+\end{table}
+
+
+
+Task: FrozenLake8x8-v1
+\begin{{table}}[h!]
+\centering
+\begin{{tabular}}{{|c|c|}}
+\hline
+Metric & Value \\
+\hline
+Accuracy & 1.0000 \\
+Precision & 1.0000 \\
+Recall & 1.0000 \\
+F1 & 1.0000 \\
+Computation Time (s) & 0.0524 \\
+\hline
+\end{tabular}
+\caption{FrozenLake8x8-v1}
+\end{table}

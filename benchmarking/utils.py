@@ -5,6 +5,7 @@ import gymnasium as gym
 import networkx as nx
 import numpy as np
 import pandas as pd
+import pyAgrum as gum
 import torch
 
 from scipy.stats import t
@@ -505,4 +506,65 @@ def benchmarking_df_pgmpy(
         discrete_target,
         computation_time,
         file_path=file_path + "/pgmpy",
+    )
+
+
+def benchmarking_df_pyagrum(
+    dag: nx.DiGraph,
+    data: pd.DataFrame,
+    target_node: str,
+    discrete_target: bool,
+    task_name: str = "task",
+    file_path: str = "",
+):
+
+    # Convert NetworkX DAG to a pyAgrum Bayesian Network
+    bn = gum.BayesNet(task_name)
+
+    # Add nodes (discrete variables assumed)
+    for node in data.columns:
+        bn.add(gum.LabelizedVariable(node, node, len(data[node].unique())))
+
+    # Add edges from DAG
+    for parent, child in dag.edges:
+        bn.addArc(parent, child)
+
+    # Learn CPDs from data
+    learner = gum.BNLearner(data)
+    learner.useK2()
+    bn = learner.learnParameters(bn)
+
+    # Perform inference using pyAgrum's Variable Elimination
+    ie = gum.LazyPropagation(bn)
+
+    # Prepare data for inference
+    true_values = data[target_node].values
+    pred_values = np.zeros(len(data))
+
+    computation_time = time.time()
+
+    for n, row in tqdm(
+        data.iterrows(), desc="benchmarking df pyagrum...", total=len(data)
+    ):
+        evidence = {
+            feat: row[feat_idx]
+            for feat_idx, feat in enumerate(data.columns)
+            if feat != target_node
+        }
+
+        ie.setEvidence(evidence)
+        ie.makeInference()
+
+        pred_values[n] = ie.posterior(target_node).mode()
+
+    computation_time = time.time() - computation_time
+
+    # Report results
+    report_metrics_as_latex(
+        task_name,
+        pred_values,
+        true_values,
+        discrete_target,
+        computation_time,
+        file_path=file_path + "/pyagrum",
     )

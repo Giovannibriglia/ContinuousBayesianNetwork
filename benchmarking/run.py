@@ -5,6 +5,7 @@ from gymnasium import envs
 from benchmarking.utils import (
     benchmarking_df,
     benchmarking_df_pgmpy,
+    benchmarking_df_pyagrum,
     collect_data_gymnasium,
     define_dag,
     generate_simulation_name,
@@ -15,7 +16,10 @@ from benchmarking.utils import (
 if __name__ == "__main__":
     """
     pip install "gymnasium[all]"
+    pip install pgmpy
+    pip install pyAgrum
     """
+
     target_feature = "reward"
 
     dir_saving = generate_simulation_name()
@@ -28,8 +32,8 @@ if __name__ == "__main__":
     # env_ids = [
     #    "FrozenLake-v1"
     # ]  # ["Walker2d-v5", "HumanoidStandup-v5", "HalfCheetah-v5", "Pusher-v5"]
-    # env_ids = ["Taxi-v3", "FrozenLake-v1"]
-    env_ids = ["CliffWalking-v0"]
+    env_ids = ["FrozenLake-v1", "Taxi-v3"]
+    # env_ids = ["CliffWalking-v0"]
     print(len(env_ids), env_ids)
     n_steps = 100000
 
@@ -73,3 +77,12 @@ if __name__ == "__main__":
         except Exception as e:
             print(e)
             print(f"{env_id} cannot be solved with pgmpy MLE and Variable Elimination")
+
+        benchmarking_df_pyagrum(
+            dag,
+            data,
+            target_feature,
+            if_discrete,
+            task_name=env_id,
+            file_path=f"{dir_saving}",
+        )

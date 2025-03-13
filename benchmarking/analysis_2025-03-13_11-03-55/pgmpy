@@ -1,0 +1,55 @@
+
+Task: Blackjack-v1
+\begin{{table}}[h!]
+\centering
+\begin{{tabular}}{{|c|c|}}
+\hline
+Metric & Value \\
+\hline
+MAE & 0.7011 \\
+MSE & 1.2155 \\
+R2 & -0.9352 \\
+MAPE & 755817613729507.7500 \\
+Computation Time (s) & 1.0612 \\
+\hline
+\end{tabular}
+\caption{Blackjack-v1}
+\end{table}
+
+
+
+Task: FrozenLake-v1
+\begin{{table}}[h!]
+\centering
+\begin{{tabular}}{{|c|c|}}
+\hline
+Metric & Value \\
+\hline
+Accuracy & 1.0000 \\
+Precision & 1.0000 \\
+Recall & 1.0000 \\
+F1 & 1.0000 \\
+Computation Time (s) & 0.0268 \\
+\hline
+\end{tabular}
+\caption{FrozenLake-v1}
+\end{table}
+
+
+
+Task: FrozenLake8x8-v1
+\begin{{table}}[h!]
+\centering
+\begin{{tabular}}{{|c|c|}}
+\hline
+Metric & Value \\
+\hline
+Accuracy & 1.0000 \\
+Precision & 1.0000 \\
+Recall & 1.0000 \\
+F1 & 1.0000 \\
+Computation Time (s) & 0.1272 \\
+\hline
+\end{tabular}
+\caption{FrozenLake8x8-v1}
+\end{table}
