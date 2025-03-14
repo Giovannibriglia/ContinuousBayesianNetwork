@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pyAgrum as gum
 import torch
+from pyAgrum.lib.discretizer import Discretizer
 
 from scipy.stats import t
 from sklearn.metrics import (
@@ -225,26 +226,52 @@ def report_metrics_as_latex(
             compute_confidence_interval(y_true, y_pred, confidence_interval)
         )
     else:
-        # Discrete case: Classification metrics
+        # Ensure integer values
+        y_true = np.array(y_true, dtype=int)
+        y_pred = np.array(y_pred, dtype=int)
 
-        if len(np.unique(y_true)) == 2 and len(np.unique(y_pred)) == 2:
+        # Discrete case: Classification metrics
+        unique_labels = np.unique(y_true)
+
+        """# Debugging
+        print("Unique labels in y_true:", unique_labels)
+        print("Unique labels in y_pred:", np.unique(y_pred))"""
+
+        if len(unique_labels) == 2 and set(unique_labels).issubset(
+            set(np.unique(y_pred))
+        ):
             # Binary classification
             metrics["Accuracy"] = accuracy_score(y_true, y_pred)
 
-            unique_labels = np.unique(y_true)
             # Use the higher value in unique_labels as the positive label
             pos_label = max(unique_labels)
 
             metrics["Precision"] = precision_score(
                 y_true, y_pred, pos_label=pos_label, zero_division=0
             )
-            metrics["Recall"] = recall_score(y_true, y_pred, pos_label=pos_label)
-            metrics["F1"] = f1_score(y_true, y_pred, pos_label=pos_label)
+
+            # Check if pos_label exists in y_true before computing recall
+            if pos_label in y_true:
+                metrics["Recall"] = recall_score(
+                    y_true, y_pred, pos_label=pos_label, zero_division=1
+                )
+            else:
+                metrics["Recall"] = 0.0  # No true positives exist, so recall is 0
+
+            metrics["F1"] = f1_score(
+                y_true, y_pred, pos_label=pos_label, zero_division=1
+            )
+
         else:
-            # Multi-class classification
+            # Multiclass classification
             metrics["Accuracy"] = accuracy_score(y_true, y_pred)
-            metrics["F1 Micro"] = f1_score(y_true, y_pred, average="micro")
-            metrics["F1 Macro"] = f1_score(y_true, y_pred, average="macro")
+            metrics["Precision"] = precision_score(
+                y_true, y_pred, average="macro", zero_division=0
+            )
+            metrics["Recall"] = recall_score(
+                y_true, y_pred, average="macro", zero_division=0
+            )
+            metrics["F1"] = f1_score(y_true, y_pred, average="macro", zero_division=0)
 
     # Add computation time
     metrics["Computation Time (s)"] = computation_time
@@ -327,7 +354,9 @@ def benchmarking_df(
     pred_values = np.zeros((len(data),))
 
     computation_time = time.time()
-    for n in tqdm(range(0, len(data), batch_size), desc="benchmarking df..."):
+
+    progress_bar = tqdm(total=len(data), desc="benchmarking df cbn...")
+    for n in range(0, len(data), batch_size):
         evidence = {
             feat: dict_values[feat][n : n + batch_size].unsqueeze(-1).to("cuda")
             for feat in data.columns
@@ -355,6 +384,11 @@ def benchmarking_df(
         )  # Shape [batch_size]
 
         pred_values[n : n + batch_size] = pred_values_batch
+
+        batch_end = min(n + batch_size, len(data))
+        progress_bar.update(batch_end - n)  # Update by actual batch size
+
+    progress_bar.close()
 
     computation_time = time.time() - computation_time
 
@@ -430,8 +464,7 @@ def benchmarking_df_pyagrum(
     task_name: str = "task",
     file_path: str = "",
 ):
-
-    # Convert NetworkX DAG to a pyAgrum Bayesian Network
+    """# Convert NetworkX DAG to a pyAgrum Bayesian Network
     bn = gum.BayesNet(task_name)
 
     # Add nodes (discrete variables assumed)
@@ -445,10 +478,18 @@ def benchmarking_df_pyagrum(
     # Learn CPDs from data
     learner = gum.BNLearner(data)
     learner.useK2()
-    bn = learner.learnParameters(bn)
+    bn = learner.learnParameters(bn)"""
 
-    # Perform inference using pyAgrum's Variable Elimination
+    discretizer = Discretizer()
+    bn = discretizer.discretizedTemplate(data)
+    for arc in dag.edges():
+        bn.addArc(arc[0], arc[1])
+    learner = gum.BNLearner(data, bn)
+
+    learner.useSmoothingPrior()
+    learner.fitParameters(bn)
     ie = gum.LazyPropagation(bn)
+    ie.makeInference()
 
     # Prepare data for inference
     true_values = data[target_node].values
@@ -459,16 +500,23 @@ def benchmarking_df_pyagrum(
     for n, row in tqdm(
         data.iterrows(), desc="benchmarking df pyagrum...", total=len(data)
     ):
+        """evidence = {
+            feat: [
+                1.0 if value == row[feat_idx].item() else 0.0
+                for value in sorted(data[feat].unique())
+            ]
+            for feat_idx, feat in enumerate(data.columns)
+            if feat != target_node
+        }"""
         evidence = {
-            feat: row[feat_idx]
+            feat: str(row.iloc[feat_idx].item())
             for feat_idx, feat in enumerate(data.columns)
             if feat != target_node
         }
-
         ie.setEvidence(evidence)
         ie.makeInference()
 
-        pred_values[n] = ie.posterior(target_node).mode()
+        pred_values[n] = ie.posterior(target_node).argmax()[0][0][target_node]
 
     computation_time = time.time() - computation_time
 
