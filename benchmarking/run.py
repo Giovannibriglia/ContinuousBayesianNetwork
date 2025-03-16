@@ -4,8 +4,6 @@ from gymnasium import envs
 
 from benchmarking.utils import (
     benchmarking_df,
-    benchmarking_df_pgmpy,
-    benchmarking_df_pyagrum,
     collect_data_gymnasium,
     define_dag,
     generate_simulation_name,
@@ -65,7 +63,7 @@ if __name__ == "__main__":
             file_path=f"{dir_saving}",
         )
 
-        try:
+        """try:
             benchmarking_df_pgmpy(
                 dag,
                 data,
@@ -88,6 +86,6 @@ if __name__ == "__main__":
                 file_path=f"{dir_saving}",
             )
         except Exception as e:
-            print("PyAgrum: ", e)
+            print("PyAgrum: ", e)"""
 
         print("\n")
