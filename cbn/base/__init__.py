@@ -1,3 +1,5 @@
-min_tolerance = 1e-10
+KEY_CONTINUOUS = "continuous"
+KEY_DISCRETE = "discrete"
 
-initial_uncertainty = 0.0
+KEY_MAX_CARDINALITY_FOR_DISCRETE = "max_cardinality_for_discrete_domain"
+BASE_MAX_CARDINALITY = 20

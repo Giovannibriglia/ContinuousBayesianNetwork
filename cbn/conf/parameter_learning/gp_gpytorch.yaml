@@ -1,0 +1,18 @@
+
+estimator_name: "gp_gpytorch"
+
+model:
+  likelihood: "GaussianLikelihood"
+  model: "ExactGP"
+  mll: "ExactMarginalLogLikelihood"
+  mean: "ZeroMean"
+  kernel: "RBFKernel"
+  scale_kernel: True
+
+optimizer:
+  name: "Adam"
+  params:
+    lr: 0.001
+
+train:
+  n_epochs: 100

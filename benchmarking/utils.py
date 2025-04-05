@@ -1,3 +1,4 @@
+import os
 import time
 from datetime import datetime
 from typing import List, Tuple
@@ -45,6 +46,9 @@ def collect_data_gymnasium(env_name, n_steps):
     if_discrete = isinstance(env.action_space, gym.spaces.Discrete) and isinstance(
         env.observation_space, gym.spaces.Discrete
     )
+
+    if env_name == "Blackjack-v1":
+        if_discrete = True
 
     # Reset the environment
     observation, info = env.reset()
@@ -190,7 +194,7 @@ def compute_confidence_interval(y_true, y_pred, confidence: float = 0.95):
     lower_bound = mean_error - margin_of_error
     upper_bound = mean_error + margin_of_error
 
-    return lower_bound, upper_bound
+    return lower_bound.item(), upper_bound.item()
 
 
 def report_metrics_as_latex(
@@ -199,11 +203,18 @@ def report_metrics_as_latex(
     y_true,
     if_discrete,
     computation_time,
-    file_path="report.txt",
+    xlsx_path="report.xlsx",
+    txt_path="report.txt",
     confidence_interval: float = 0.95,
 ):
     """
-    Reports metrics for each task and saves them in LaTeX table format.
+    Compute metrics and store them in a single table (pandas DataFrame) across multiple tasks.
+    The function:
+        1) Reads/creates a DataFrame from `xlsx_path`.
+        2) Computes metrics for this task.
+        3) Appends a new row for this task.
+        4) Saves the updated DataFrame back to Excel.
+        5) Converts the entire DataFrame into a single LaTeX table and writes it to `txt_path`.
 
     Args:
         task_name (str): Name of the task (environment or experiment).
@@ -211,90 +222,136 @@ def report_metrics_as_latex(
         y_true (array-like): True values.
         if_discrete (bool): If discrete or continuous problem.
         computation_time (float): Time taken for inference in seconds.
-        file_path (str): Path to save the report.
-        confidence_interval (float): confidence interval.
+        xlsx_path (str): Path to the Excel file storing the aggregated table.
+        txt_path (str): Path to a .txt file storing the LaTeX version of the entire table.
+        confidence_interval (float): Confidence interval to use in continuous tasks.
     """
-    # Compute metrics
-    metrics = {}
+
+    # ---- 1) Compute metrics for the current task  ----
+    metrics_dict = {"Task": task_name}  # We'll store all metrics as columns
     if not if_discrete:
-        # Continuous case: Regression metrics
-        metrics["MAE"] = mean_absolute_error(y_true, y_pred)
-        metrics["MSE"] = mean_squared_error(y_true, y_pred)
-        metrics["R2"] = r2_score(y_true, y_pred)
-        metrics["MAPE"] = mean_absolute_percentage_error(y_true, y_pred)
-        metrics[f"conf_int_{int(confidence_interval * 100)}"] = (
-            compute_confidence_interval(y_true, y_pred, confidence_interval)
-        )
+        # Continuous (Regression) metrics
+        mae_val = mean_absolute_error(y_true, y_pred)
+        mse_val = mean_squared_error(y_true, y_pred)
+        r2_val = r2_score(y_true, y_pred)
+        mape_val = mean_absolute_percentage_error(y_true, y_pred)
+        conf_int_val = compute_confidence_interval(
+            np.array(y_true), np.array(y_pred), confidence_interval
+        )  # returns a tuple
+
+        metrics_dict["MAE"] = mae_val
+        metrics_dict["MSE"] = mse_val
+        metrics_dict["R2"] = r2_val
+        metrics_dict["MAPE"] = mape_val
+        metrics_dict[f"conf_int_{int(confidence_interval * 100)}"] = conf_int_val
     else:
-        # Ensure integer values
+        # Discrete (Classification) metrics
         y_true = np.array(y_true, dtype=int)
         y_pred = np.array(y_pred, dtype=int)
-
-        # Discrete case: Classification metrics
         unique_labels = np.unique(y_true)
 
-        """# Debugging
-        print("Unique labels in y_true:", unique_labels)
-        print("Unique labels in y_pred:", np.unique(y_pred))"""
-
+        # If it's binary classification with matching labels
         if len(unique_labels) == 2 and set(unique_labels).issubset(
             set(np.unique(y_pred))
         ):
-            # Binary classification
-            metrics["Accuracy"] = accuracy_score(y_true, y_pred)
-
-            # Use the higher value in unique_labels as the positive label
+            # The higher label is considered the positive class
             pos_label = max(unique_labels)
-
-            metrics["Precision"] = precision_score(
-                y_true, y_pred, pos_label=pos_label, zero_division=0
+            metrics_dict["Accuracy"] = accuracy_score(y_true, y_pred) * 100
+            metrics_dict["Precision"] = (
+                precision_score(y_true, y_pred, pos_label=pos_label, zero_division=0)
+                * 100
             )
-
-            # Check if pos_label exists in y_true before computing recall
+            # Check if pos_label actually appears in y_true
             if pos_label in y_true:
-                metrics["Recall"] = recall_score(
-                    y_true, y_pred, pos_label=pos_label, zero_division=1
+                metrics_dict["Recall"] = (
+                    recall_score(y_true, y_pred, pos_label=pos_label, zero_division=1)
+                    * 100
                 )
             else:
-                metrics["Recall"] = 0.0  # No true positives exist, so recall is 0
+                metrics_dict["Recall"] = 0.0
 
-            metrics["F1"] = f1_score(
-                y_true, y_pred, pos_label=pos_label, zero_division=1
+            metrics_dict["F1"] = (
+                f1_score(y_true, y_pred, pos_label=pos_label, zero_division=1) * 100
             )
 
+            metrics_dict[f"conf_int_{int(confidence_interval * 100)}"] = (
+                np.nan
+            )  # returns a tuple
         else:
             # Multiclass classification
-            metrics["Accuracy"] = accuracy_score(y_true, y_pred)
-            metrics["Precision"] = precision_score(
-                y_true, y_pred, average="macro", zero_division=0
+            metrics_dict["Accuracy"] = accuracy_score(y_true, y_pred) * 100
+            metrics_dict["Precision"] = (
+                precision_score(y_true, y_pred, average="macro", zero_division=0) * 100
             )
-            metrics["Recall"] = recall_score(
-                y_true, y_pred, average="macro", zero_division=0
+            metrics_dict["Recall"] = (
+                recall_score(y_true, y_pred, average="macro", zero_division=0) * 100
             )
-            metrics["F1"] = f1_score(y_true, y_pred, average="macro", zero_division=0)
+            metrics_dict["F1"] = (
+                f1_score(y_true, y_pred, average="macro", zero_division=0) * 100
+            )
+            metrics_dict[f"conf_int_{int(confidence_interval * 100)}"] = (
+                np.nan
+            )  # returns a tuple
 
     # Add computation time
-    metrics["Computation Time (s)"] = computation_time
+    metrics_dict["Computation Time (s)"] = computation_time
 
-    # Format as LaTeX
-    latex_table = (
-        "\\begin{{table}}[h!]\n\\centering\n\\begin{{tabular}}{{|c|c|}}\n\\hline\n"
-    )
-    latex_table += "Metric & Value \\\\\n\\hline\n"
-    for metric, value in metrics.items():
-        if isinstance(value, tuple):
-            latex_table += f"{metric} & {[v.item() for v in value]} \\\\\n"
-        else:
-            latex_table += f"{metric} & {value:.4f} \\\\\n"
-    latex_table += (
-        "\\hline\n\\end{tabular}\n\\caption{" + task_name + "}\n\\end{table}\n"
+    # ---- 2) Read or create the DataFrame from disk  ----
+    if os.path.exists(xlsx_path):
+        df = pd.read_excel(xlsx_path)
+    else:
+        df = pd.DataFrame()
+
+    # ---- 3) Merge columns: union of existing columns with new metrics  ----
+    # We do this so that even if the new row has new metric columns, we incorporate them.
+    all_columns = set(df.columns).union(metrics_dict.keys())
+    # Force a sorted list of columns (optional) or just keep them unsorted
+    all_columns = sorted(all_columns)
+    # Remove the three desired columns from the original list
+    all_columns.remove("Task")
+    all_columns.remove(f"conf_int_{int(confidence_interval * 100)}")
+    all_columns.remove("Computation Time (s)")
+
+    # Reconstruct the column order
+    new_column_order = (
+        ["Task"]
+        + all_columns
+        + [f"conf_int_{int(confidence_interval * 100)}", "Computation Time (s)"]
     )
 
-    # Save to file
-    with open(file_path, "a") as f:
-        f.write(f"\nTask: {task_name}\n")
+    # Reindex the existing df to have the union of columns
+    df = df.reindex(columns=new_column_order)
+
+    # Create the row as a DataFrame (1 row)
+    row_df = pd.DataFrame([metrics_dict], columns=new_column_order)
+
+    # ---- 4) Append new row to the DataFrame  ----
+    df = pd.concat([df, row_df], ignore_index=True)
+
+    # ---- 5) Write the updated DataFrame to Excel  ----
+    df.to_excel(xlsx_path, index=False)
+
+    # ---- 6) Convert the entire DataFrame to LaTeX  ----
+    latex_table = df.to_latex(index=False, na_rep="NaN", float_format="%.2e")
+
+    # You can also generate a more "raw" LaTeX (with tabular environment, etc.) if you prefer:
+    # latex_table = df.style.format(precision=4).to_latex()  # for a styled version
+    #
+    # or do something more manual like:
+    #
+    # latex_table = "\\begin{table}[h!]\n\\centering\n"
+    # latex_table += df.to_latex(index=False, na_rep="NaN", float_format="%.4f")
+    # latex_table += "\\caption{All tasks}\n\\end{table}\n"
+
+    # ---- 7) Write (overwrite or append) the LaTeX table to the .txt file  ----
+    # Typically, you'd overwrite to keep it up-to-date with the entire table:
+    with open(txt_path, "w", encoding="utf-8") as f:
+        f.write("All tasks, aggregated metrics\n\n")
         f.write(latex_table)
-        f.write("\n\n")
+        f.write("\n")
+
+    """print(f"Updated Excel file: {xlsx_path}")
+    print(f"Updated LaTeX table in: {txt_path}")"""
 
 
 def define_dag(df: pd.DataFrame, target_feature: str) -> Tuple[nx.DiGraph, List, List]:
@@ -339,36 +396,38 @@ def benchmarking_df(
     batch_size: int = 64,
     task_name: str = "task",
     file_path: str = "",
-):
+) -> np.ndarray:
     from cbn.base.bayesian_network import BayesianNetwork
 
-    cbn = BayesianNetwork(dag, data)
+    data_train = data[: int(len(data) / 2)]
+    data_test = data[int(len(data) / 2) :]
+
+    cbn = BayesianNetwork(dag, data_train)
 
     dict_values = {
-        feat: torch.tensor(data[feat].values, device="cpu")
-        for feat in data.columns
+        feat: torch.tensor(data_test[feat].values, device="cpu")
+        for feat in data_test.columns
         if feat != target_node
     }
 
-    true_values = data[target_node].values
-    pred_values = np.zeros((len(data),))
+    true_values = data_test[target_node].values
+    pred_values = np.zeros((len(data_test),))
 
     computation_time = time.time()
 
-    progress_bar = tqdm(total=len(data), desc="benchmarking df cbn...")
-    for n in range(0, len(data), batch_size):
+    progress_bar = tqdm(total=len(data_test), desc="benchmarking df cbn...")
+    for n in range(0, len(data_test), batch_size):
         evidence = {
             feat: dict_values[feat][n : n + batch_size].unsqueeze(-1).to("cuda")
-            for feat in data.columns
+            for feat in data_test.columns
             if feat != target_node
         }
 
-        """cpd, pdf, parameters_domain = cbn.get_cpd_and_pdf(
-            target_node, evidence, normalize_pdf=True, N_max=64
-        )"""
-
         inference_probabilities, domain_values = cbn.infer(
-            target_node, evidence, plot_prob=False, N_max=batch_size
+            target_node,
+            evidence,
+            plot_prob=False,
+            N_max=batch_size,
         )
 
         # Get indices of max probabilities along dimension 1 (columns)
@@ -385,7 +444,7 @@ def benchmarking_df(
 
         pred_values[n : n + batch_size] = pred_values_batch
 
-        batch_end = min(n + batch_size, len(data))
+        batch_end = min(n + batch_size, len(data_test))
         progress_bar.update(batch_end - n)  # Update by actual batch size
 
     progress_bar.close()
@@ -398,8 +457,11 @@ def benchmarking_df(
         true_values,
         discrete_target,
         computation_time,
-        file_path=file_path + "/cbn",
+        xlsx_path=f"{file_path}/cbn.xlsx",
+        txt_path=f"{file_path}/cbn.txt",
     )
+
+    return pred_values
 
 
 def benchmarking_df_pgmpy(
@@ -409,7 +471,7 @@ def benchmarking_df_pgmpy(
     discrete_target: bool,
     task_name: str = "task",
     file_path: str = "",
-):
+) -> np.ndarray:
     from pgmpy.estimators import MaximumLikelihoodEstimator
     from pgmpy.inference import VariableElimination
     from pgmpy.models import BayesianNetwork
@@ -452,8 +514,11 @@ def benchmarking_df_pgmpy(
         true_values,
         discrete_target,
         computation_time,
-        file_path=file_path + "/pgmpy",
+        xlsx_path=f"{file_path}/pgmpy.xlsx",
+        txt_path=f"{file_path}/pgmpy.txt",
     )
+
+    return pred_values
 
 
 def benchmarking_df_pyagrum(
@@ -463,7 +528,7 @@ def benchmarking_df_pyagrum(
     discrete_target: bool,
     task_name: str = "task",
     file_path: str = "",
-):
+) -> np.ndarray:
     """# Convert NetworkX DAG to a pyAgrum Bayesian Network
     bn = gum.BayesNet(task_name)
 
@@ -527,5 +592,8 @@ def benchmarking_df_pyagrum(
         true_values,
         discrete_target,
         computation_time,
-        file_path=file_path + "/pyagrum",
+        xlsx_path=f"{file_path}/pyagrum.xlsx",
+        txt_path=f"{file_path}/pyagrum.txt",
     )
+
+    return pred_values

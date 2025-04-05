@@ -1,4 +1,9 @@
+from typing import Dict
+
 import torch
+
+from cbn.base.parameter_learning import BaseParameterLearningEstimator
+from cbn.parameter_learning import ESTIMATORS
 
 
 def get_distribution_parameters(dist: torch.distributions.Distribution):
@@ -14,32 +19,13 @@ def get_distribution_parameters(dist: torch.distributions.Distribution):
     return {key: getattr(dist, key) for key in vars(dist) if not key.startswith("_")}
 
 
-def uniform_sample_tensor(
-    input_tensor: torch.Tensor, n_samples: int = None
-) -> torch.Tensor:
-    """
-    Uniformly selects n_samples from each row of input_tensor.
+def choose_probability_estimator(
+    estimator_name: str, config: Dict, **kwargs
+) -> BaseParameterLearningEstimator:
 
-    Args:
-        input_tensor (torch.Tensor): Tensor of shape [n_queries, n_values], sorted along dim=1.
-        n_samples (int): Number of samples to uniformly cover the tensor domain.
+    if estimator_name in ESTIMATORS.keys():
+        estimator_class = ESTIMATORS[estimator_name](config, **kwargs)
+    else:
+        raise ValueError(f"Unknown estimator: {estimator_name}")
 
-    Returns:
-        torch.Tensor: Tensor of shape [n_queries, n_samples] with uniformly sampled values,
-                      or the original tensor if n_samples > n_values.
-    """
-    n_queries, n_values = input_tensor.shape
-
-    if n_samples is None:
-        return input_tensor
-
-    if n_samples >= n_values:
-        return input_tensor
-
-    indices = torch.linspace(
-        0, n_values - 1, steps=n_samples, device=input_tensor.device
-    )
-    indices = indices.round().long().clamp(max=n_values - 1)
-    sampled_tensor = input_tensor[:, indices]
-
-    return sampled_tensor
+    return estimator_class
