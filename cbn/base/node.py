@@ -1,9 +1,9 @@
-import math
 import random
 
 from typing import Dict, List, Tuple
 
 import torch
+from tqdm import tqdm
 
 from cbn.base import (
     BASE_MAX_CARDINALITY,
@@ -113,228 +113,150 @@ class Node:
     def sample(self, N: int, **kwargs) -> torch.Tensor:
         return self.estimator.sample(N, **kwargs)
 
-    def get_prob2(
-        self, query: Dict[str, torch.Tensor], N: int = 1024
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-
-        :param query: dict of torch. Tensors, each one has shape [n_queries, 1]
-        :param N: number of samples required in evidence is not provided
-        :return: pdf, node_domains, parents_domains
-        """
-
-        n_queries = query[next(iter(query.keys()))].shape[0]
-
-        # check n_queries
-        assert all(
-            [query[feat].shape[0] == n_queries for feat in query.keys()]
-        ), ValueError("n_queries must be equal for all features.")
-        assert all([query[feat].dim() == 2 for feat in query.keys()]), ValueError(
-            "each tensor for the query variables must have dimension = 2."
-        )
-
-        # get_target_feature
-        node_query = query.pop(self.node_name, None)
-
-        # setup query
-        parents_query, parents_domains = self._setup_parents_query(query, N)
-        # if evidence is complete: [n_queries, n_parents_features, 1], [n_queries, n_parents_features, 1] else
-        # [n_queries, n_parents_features, n_combinations], [n_queries, n_parents_features, N]
-
-        if node_query is None:
-            target_node_domains = (
-                self._sample_domain(self.node_name, N)
-                .unsqueeze(0)
-                .expand(
-                    n_queries,
-                    -1,
-                )
-            )
-        else:
-            target_node_domains = node_query
-
-        n_samples_node = target_node_domains.shape[1]
-        _, n_parents, n_combinations_for_parent = parents_query.shape
-        # total_parents_combinations = n_parents * n_combinations_for_parent
-
-        pdfs = torch.empty(
-            (n_queries, n_combinations_for_parent, n_samples_node),
-            dtype=self.fixed_dtype,
-            device=self.device,
-        )
-
-        for i in range(n_combinations_for_parent):
-            q = parents_query[:, :, i, None]
-            # evaluate query
-            pdfs[:, i, :] = self.estimator.get_prob(target_node_domains, q)
-
-        if n_combinations_for_parent > 1:
-            pdfs = pdfs.view(
-                n_queries, n_parents, -1, n_samples_node
-            )  # [n_queries, n_parents, N*n_parents, n_samples_node]
-        else:
-            pdfs = pdfs.repeat(1, n_parents, 1)
-            pdfs = pdfs.view(
-                n_queries, n_parents, 1, n_samples_node
-            )  # [n_queries, n_parents, N*n_parents, n_samples_node]
-
-        parents_domains = parents_domains.repeat(
-            1, 1, n_parents
-        )  # [n_queries, n_parents, N*n_parents]
-
-        # pdfs: [n_queries, n_parents, 1oN*n_parents, n_samples_node]
-        # target_node_domains: [n_queries, n_node_values]
-        # parents_domains: [n_queries, n_parents, 1oN*n_parents]
-
-        if self.plot_prob:
-            self._plot_pdfs(pdfs, target_node_domains, parents_domains)
-
-        assert pdfs.shape == target_node_domains.shape, ValueError(
-            f"pdf and domain must have same shape; instead: {pdfs.shape} and {target_node_domains.shape}"
-        )
-        return pdfs, target_node_domains, parents_domains
-
     def get_prob(
         self, query: Dict[str, torch.Tensor], N: int = 1024
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, List[torch.Tensor]]:
         """
-
-        :param query: dict of torch. Tensors, each one has shape [n_queries, 1]
-        :param N: number of samples required in evidence is not provided
-        :return: pdf, node_domains, parents_domains
+        :param query: dict of torch.Tensors, each with shape [n_queries, 1]
+        :param N: number of samples if evidence is not provided
+        :return: pdf, target_node_domains, parents_domains
+                 - pdf: tensor of shape [n_queries, d_0, d_1, ..., d_{n_parents}, n_samples_node]
+                 - target_node_domains: tensor of shape [n_queries, n_samples_node]
+                 - parents_domains: a list (length n_parents) of tensors, each of shape [n_queries, d_i]
         """
-        if len(query.keys()) > 0:
-            n_queries = query[next(iter(query.keys()))].shape[0]
-            # check n_queries
-            assert all(
-                [query[feat].shape[0] == n_queries for feat in query.keys()]
-            ), ValueError("n_queries must be equal for all features.")
-            assert all([query[feat].dim() == 2 for feat in query.keys()]), ValueError(
-                "each tensor for the query variables must have dimension = 2."
-            )
+        # Validate and get n_queries.
+        if query:
+            n_queries = next(iter(query.values())).shape[0]
+            for feat, tensor in query.items():
+                assert tensor.shape[0] == n_queries, ValueError(
+                    "n_queries must be equal for all features."
+                )
+                assert tensor.dim() == 2, ValueError(
+                    "Each query tensor must be of dimension 2."
+                )
         else:
             n_queries = 1
 
-        # get_target_feature
+        # Extract target node query (if any)
         node_query = query.pop(self.node_name, None)
 
-        # setup query
+        # Set up parent's query.
         parents_query, parents_domains = self._setup_parents_query(query, N)
-        # if evidence is complete: [n_queries, n_parents_features, 1], [n_queries, n_parents_features, 1] else
-        # [n_queries, n_parents_features, n_combinations], [n_queries, n_parents_features, N]
+        total_parents_combinations = parents_query.shape[2]
+        print(total_parents_combinations)
+        # parents_query has shape [n_queries, n_parents, total_parents_combinations]
+        # parents_domains is a list of length n_parents, each tensor of shape [n_queries, d_i]
 
+        # Get target node evaluation points.
         if node_query is None:
             target_node_domains = (
                 self._sample_domain(self.node_name, N)
                 .unsqueeze(0)
-                .expand(
-                    n_queries,
-                    -1,
-                )
+                .expand(n_queries, -1)
             )
         else:
             target_node_domains = node_query
-
         n_samples_node = target_node_domains.shape[1]
-        _, n_parents, n_combinations_for_parent = parents_query.shape
-        # total_parents_combinations = n_parents * n_combinations_for_parent
 
+        parent_dims = []
+        if total_parents_combinations > 1:
+            for _ in self.parents_names:
+                parent_dims.append(N)
+        else:
+            for _ in self.parents_names:
+                parent_dims.append(1)
+
+        # Initialize pdf tensor.
         pdfs = torch.empty(
-            (n_queries, n_combinations_for_parent, n_samples_node),
+            (n_queries, total_parents_combinations, n_samples_node),
             dtype=self.fixed_dtype,
             device=self.device,
         )
-
-        for i in range(n_combinations_for_parent):
-            q = parents_query[:, :, i, None]
-            # evaluate query
-            pdfs[:, i, :] = self.estimator.get_prob(target_node_domains, q)
-
-        if n_combinations_for_parent > 1:
-            pdfs = pdfs.view(
-                n_queries, n_parents, -1, n_samples_node
-            )  # [n_queries, n_parents, N*n_parents, n_samples_node]
+        if total_parents_combinations > 1:
+            new_parents_query = parents_query.permute(2, 1, 0)
+            for i in range(new_parents_query.shape[2]):
+                q = new_parents_query[:, :, i, None]
+                new_target_node_domains = (
+                    target_node_domains[i]
+                    .unsqueeze(0)
+                    .expand(total_parents_combinations, -1)
+                )
+                pdfs[i, :, :] = self.estimator.get_prob(new_target_node_domains, q)
         else:
-            pdfs = pdfs.repeat(1, n_parents, 1)
-            pdfs = pdfs.view(
-                n_queries, n_parents, 1, n_samples_node
-            )  # [n_queries, n_parents, N*n_parents, n_samples_node]
+            # For each configuration (Cartesian product index), compute the pdf.
+            for i in tqdm(range(total_parents_combinations)):
+                # q has shape [n_queries, n_parents, 1]: one value per parent for this configuration.
+                q = parents_query[:, :, i, None]
+                # Each call returns [n_queries, n_samples_node]
+                pdfs[:, i, :] = self.estimator.get_prob(target_node_domains, q)
 
-        parents_domains = parents_domains.repeat(
-            1, 1, n_parents
-        )  # [n_queries, n_parents, N*n_parents]
-
-        # pdfs: [n_queries, n_parents, 1oN*n_parents, n_samples_node]
-        # target_node_domains: [n_queries, n_node_values]
-        # parents_domains: [n_queries, n_parents, 1oN*n_parents]
+        # Reshape pdfs to include a separate dimension for each parent.
+        new_shape = [n_queries] + parent_dims + [n_samples_node]
+        pdfs = pdfs.view(*new_shape)
 
         if self.plot_prob:
             self._plot_pdfs(pdfs, target_node_domains, parents_domains)
 
-        assert pdfs.shape == target_node_domains.shape, ValueError(
-            f"pdf and domain must have same shape; instead: {pdfs.shape} and {target_node_domains.shape}"
-        )
         return pdfs, target_node_domains, parents_domains
 
     def _setup_parents_query(
         self, query: Dict[str, torch.Tensor], N: int
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        :param query: query as a Dict of torch.Tensors, each one has shape [n_queries, 1]
-        :param N: number of samples required if evidence is not provided
-        :return: query as a torch.Tensor with shape [n_queries, n_parents_features, n_parents_combinations] and parents evaluation points [n_queries, n_parents_features, 1 or N]
+        :param query: Dict of torch.Tensors, each with shape [n_queries, 1]
+        :param N: number of samples if evidence is not provided
+        :return:
+             new_query: tensor of shape [n_queries, n_parents, total_combinations],
+                        where total_combinations is the Cartesian product of each parent's evaluation points.
+             parents_evaluation_points: tensor of shape [n_queries, n_parents, (1 or N)]
         """
-
         query_features = sorted(list(query.keys()))
+        # Reorder query according to the sorted keys.
         query = {key: query[key] for key in query_features}
-        if len(query_features) > 0:
-            parents_in_query = list(query.keys())
-            n_start_queries = query[parents_in_query[0]].shape[0]
 
+        if query_features:
+            n_start_queries = query[query_features[0]].shape[0]
+            # Ensure all provided query features are valid parents.
             assert all(
-                query_feat in self.parents_names for query_feat in query_features
+                feat in self.parents_names for feat in query_features
             ), ValueError("You have specified parent features that don't exist")
 
             if query_features == self.parents_names:
+                # All parent evidences provided.
                 new_query = torch.zeros(
-                    (n_start_queries, len(self.parents_names), 1),
-                    device=self.device,
+                    (n_start_queries, len(self.parents_names), 1), device=self.device
                 )
-                for i, feature_tensor in enumerate(query.values()):
-                    new_query[:, i, :] = feature_tensor
-
+                for i, parent in enumerate(self.parents_names):
+                    new_query[:, i, :] = query[parent]
                 parents_evaluation_points = new_query
             else:
+                # Not all parents provided: fill evaluation points.
                 parents_evaluation_points = torch.empty(
                     (n_start_queries, len(self.parents_names), N),
                     device=self.device,
                     dtype=self.fixed_dtype,
                 )
-
-                n_missing_parents = 0
                 for i, parent_feature in enumerate(self.parents_names):
                     if parent_feature in query_features:
-                        # print("1: ", query[parent_feature].expand(-1, N).shape)
+                        # Provided evidence is expanded to have N columns.
                         parents_evaluation_points[:, i, :] = query[
                             parent_feature
                         ].expand(-1, N)
                     else:
-                        n_missing_parents += 1
-
+                        # Sample uniformly from the parent's domain.
                         uniform_distribution = (
                             self._sample_domain(parent_feature, N)
                             .unsqueeze(0)
                             .expand(n_start_queries, -1)
                         )
-                        # print("2: ", uniform_distribution.shape)
                         parents_evaluation_points[:, i, :] = uniform_distribution
 
+                # Create a meshgrid (Cartesian product) across parent dimensions.
                 new_query = self._batched_meshgrid_combinations(
                     parents_evaluation_points
                 )
         else:
             n_start_queries = 1
-
             parents_evaluation_points = torch.empty(
                 (n_start_queries, len(self.parents_names), N),
                 device=self.device,
@@ -347,8 +269,6 @@ class Node:
                     .expand(n_start_queries, -1)
                 )
                 parents_evaluation_points[:, i, :] = uniform_distribution
-
-            n_missing_parents = len(self.parents_names)
             new_query = self._batched_meshgrid_combinations(parents_evaluation_points)
 
         return new_query, parents_evaluation_points
@@ -449,75 +369,6 @@ class Node:
     def load_node(self, path: str):
         raise NotImplementedError  # model (and info domains?)
 
-    @staticmethod
-    def _plot_pdfs2(
-        pdfs: torch.Tensor, node_domains: torch.Tensor, parents_domains: torch.Tensor
-    ):
-        """
-        Plot PDFs for the target node (node_domains) that have been computed
-        given the parents' domains (parents_domains). The function also prints out
-        the parents' domain values per query to clarify what led to each PDF.
-
-        Args:
-            pdfs (torch.Tensor): Shape [n_queries, n_node_values], containing
-                                 probabilities (PDF) for the node's domain.
-            node_domains (torch.Tensor): Shape [n_queries, n_node_values], containing
-                                         the actual domain values of the node being plotted.
-            parents_domains (torch.Tensor): Shape [n_queries, n_parents, n_parents_values],
-                                            containing the domain values of the parent nodes
-                                            that condition each PDF.
-        """
-        import matplotlib.pyplot as plt
-        import numpy as np
-
-        """node_domains = node_domains.T.unsqueeze(0).expand(
-            parents_domains.shape[0], -1, -1
-        )"""
-
-        pdfs_np = pdfs.detach().cpu().numpy()
-        node_domains_np = node_domains.detach().cpu().numpy()
-        parents_domains_np = parents_domains.detach().cpu().numpy()
-
-        # Make sure first dimensions match
-        if pdfs_np.shape[0] != node_domains_np.shape[0]:
-            raise ValueError(
-                "pdfs and node_domains must have the same number of queries."
-            )
-
-        # Log shapes for debugging
-        print("pdfs_np shape:", pdfs_np.shape)
-        print("node_domains_np shape:", node_domains_np.shape)
-        print("parents_domains_np shape:", parents_domains_np.shape)
-
-        # Plot
-        """plt.figure()
-        for i in range(len(pdfs_np)):
-            plt.plot(node_domains_np[i], pdfs_np[i], label=f"query {i}")
-            plt.xlabel("Domain")
-            plt.ylabel("PDF")
-            plt.legend(loc="best")
-            plt.grid(True)
-            plt.tight_layout()
-            plt.show()"""
-
-        # Compute most-probable value
-        max_idxs = np.argmax(pdfs_np, axis=1)  # shape: (n_queries,)
-        most_probable_values = node_domains_np[
-            np.arange(len(node_domains_np)), max_idxs
-        ]
-        print("Prediction:", most_probable_values)
-        print(np.unique(most_probable_values))
-        # Plot the predictions
-        plt.figure()
-        plt.scatter(np.arange(len(most_probable_values)), most_probable_values, s=30)
-        plt.xlabel("Query Index")
-        plt.ylabel("Most probable value")
-        # plt.xticks(np.unique(most_probable_values))
-        plt.ylim(ymin=-0.01, ymax=1.01)
-        plt.grid(True)
-        plt.tight_layout()
-        plt.show()
-
     def _plot_pdfs(
         self,
         pdfs: torch.Tensor,
@@ -526,68 +377,90 @@ class Node:
     ):
         """
         Args:
-            pdfs (torch.Tensor): Shape [n_queries, n_parents, N*n_parents, n_samples_node],
-                                 containing probabilities (PDF) for the node's domain.
-            node_domains (torch.Tensor): Shape [n_queries, n_node_values], containing
-                                         the actual domain values of the node being plotted.
-            parents_domains (torch.Tensor): Shape [n_queries, n_parents, N*n_parents],
-                                            containing the domain values of the parent nodes
-                                            that condition each PDF.
+            pdfs (torch.Tensor): Shape [n_queries, d0, d1, ..., d_{n_parents-1}, n_samples_node],
+                                 where each d_i is either 1 (provided evidence) or N (sampled).
+            node_domains (torch.Tensor): Shape [n_queries, n_node_values],
+                                         containing the domain values for the target node.
+            parents_domains (torch.Tensor): Shape [n_queries, n_parents, (1 or N)],
+                                            containing the domain values for each parent.
         """
-        print("pdf.shape: ", pdfs.shape)
-        print("node_domains.shape: ", node_domains.shape)
-        print("parents_domains.shape: ", parents_domains.shape)
+        import math
+
         import matplotlib.pyplot as plt
         import numpy as np
 
-        # Convert tensors to NumPy for convenience
+        """print("pdfs.shape: ", pdfs.shape)
+        print("node_domains.shape: ", node_domains.shape)
+        print("parents_domains.shape: ", parents_domains.shape)"""
+
+        # Convert tensors to NumPy arrays.
         pdfs_np = pdfs.detach().cpu().numpy()
         node_domains_np = node_domains.detach().cpu().numpy()
-        parents_domains_np = (
-            parents_domains.detach().cpu().numpy()
-        )  # Optional, if you need them
+        parents_domains_np = parents_domains.detach().cpu().numpy()
 
-        n_queries, n_parents, n_combos, n_samples_node = pdfs_np.shape
+        n_queries = pdfs_np.shape[0]
+        # The parent's dimensions are pdfs_np.shape[1:-1]
+        parent_dims = pdfs_np.shape[1:-1]
+        n_parents = len(parent_dims)
+        # n_samples_node = pdfs_np.shape[-1]
 
-        # We assume n_samples_node == node_domains_np.shape[1].
-        # Make one figure per query to avoid clutter:
+        # For each query, create a figure with one subplot per parent.
         for q in range(n_queries):
-            n_cols = min(n_parents, 2)  # at least 2 columns
+            n_cols = min(n_parents, 2)
             n_rows = math.ceil(n_parents / n_cols)
+            fig = plt.figure(figsize=(8 * n_cols, 4 * n_rows), dpi=500)
 
-            fig = plt.figure(
-                figsize=(8 * n_cols, 4 * n_rows),
-                dpi=500,
-            )
-            fig.suptitle(f"Query {q} - 3D PDFs per Parent")
-
+            subtitle = f"Query {q} - P({self.node_name}|"
+            # For each parent, average (marginalize) over all other parent's dimensions.
+            # pdfs_np[q] has shape [d0, d1, ..., d_{n_parents-1}, n_samples_node]
             for p in range(n_parents):
                 ax = fig.add_subplot(n_rows, n_cols, p + 1, projection="3d")
 
-                # Get full domains
-                parent_vals = parents_domains_np[q, p, :]  # shape: (n_combos,)
-                node_vals = node_domains_np[q]  # shape: (n_node_vals,)
-                pdf_grid = pdfs_np[q, p, :, :]  # shape: (n_combos, n_node_vals)
+                # Compute the axes over which to average: all parent axes except p.
+                n_parent_axes = len(pdfs_np[q].shape) - 1  # number of parent dimensions
+                axes_to_avg = tuple(i for i in range(n_parent_axes) if i != p)
+                # Marginalize over all other parents: result shape will be (d_p, n_samples_node)
+                pdf_plot = np.mean(pdfs_np[q], axis=axes_to_avg)
 
-                # Meshgrid for surface plot
-                P, N = np.meshgrid(parent_vals, node_vals, indexing="ij")
-                Z = pdf_grid
+                # Get the parent's domain values from parents_domains_np.
+                # parents_domains_np[q, p, :] has shape (d_p,)
+                parent_vals = parents_domains_np[q, p, :]
+                node_vals = node_domains_np[q]  # shape (n_samples_node,)
 
-                if P.shape[0] > Z.shape[0]:
-                    P = np.repeat(P, repeats=int(P.shape[0] / Z.shape[0]), axis=0)
-                    N = np.repeat(N, repeats=int(N.shape[0] / Z.shape[0]), axis=0)
+                unique_parent_vals = np.unique(parent_vals)
+
+                if len(unique_parent_vals) > 1:
+                    subtitle += f"{self.parents_names[p]}, "
+                    # Create a meshgrid: X for node domain, Y for parent domain.
+                    P, N_ = np.meshgrid(parent_vals, node_vals, indexing="ij")
+                    # pdf_plot should have shape [d_p, n_samples_node]
+                    surf = ax.plot_surface(
+                        N_,
+                        P,
+                        pdf_plot,
+                        cmap="viridis",
+                        edgecolor="k",
+                        linewidth=0.8,
+                        alpha=0.8,
+                    )
+                    ax.set_title(f"{self.parents_names[p]}")
+                    ax.set_xlabel(f"Domain of {self.node_name}")
+                    ax.set_ylabel(f"Domain of {self.parents_names[p]}")
+                    ax.set_zlabel("PDF")
+                    fig.colorbar(surf, ax=ax, shrink=0.7, aspect=15)
                 else:
-                    P = np.repeat(P, repeats=int(Z.shape[0] / P.shape[0]), axis=0)
-                    N = np.repeat(N, repeats=int(Z.shape[0] / N.shape[0]), axis=0)
-                # Plot surface
-                surf = ax.plot_surface(
-                    N, P, Z, cmap="viridis", edgecolor="k", linewidth=0.8, alpha=0.8
-                )
+                    subtitle += f"{self.parents_names[p]}={unique_parent_vals[0]}, "
+                    # Only one value for this parent: use a simple 2D line plot.
+                    # pdf_plot is of shape [1, n_samples_node] -> squeeze to [n_samples_node]
+                    ax = fig.add_subplot(n_rows, n_cols, p + 1)
+                    ax.plot(node_vals, pdf_plot[0], marker="o")
+                    ax.set_title(f"{self.parents_names[p]} = {unique_parent_vals[0]}")
+                    ax.set_xlabel(f"Domain of {self.node_name}")
+                    ax.set_ylabel("PDF")
+                    ax.set_ylim(ymin=-0.001, ymax=1.001)
+                    ax.grid(True)
 
-                ax.set_title(f"{self.parents_names[p]}")
-                ax.set_xlabel(f"Domain of {self.node_name}")
-                ax.set_ylabel(f"Domain of {self.parents_names[p]}")
-                ax.set_zlabel("PDF")
-                fig.colorbar(surf, ax=ax, shrink=0.7, aspect=15)
-
+            subtitle = subtitle[:-2]
+            subtitle += ")"
+            fig.suptitle(subtitle)
             plt.show()

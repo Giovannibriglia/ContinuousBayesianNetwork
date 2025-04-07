@@ -5,9 +5,9 @@ import torch
 from cbn.base.parameter_learning import BaseParameterLearningEstimator
 
 
-class MLE(BaseParameterLearningEstimator):
+class BruteForce(BaseParameterLearningEstimator):
     def __init__(self, config: Dict, **kwargs):
-        super(MLE, self).__init__(config=config, **kwargs)
+        super(BruteForce, self).__init__(config=config, **kwargs)
         self.mle_tensor = None
         self._setup_model(config, **kwargs)
 
@@ -16,7 +16,6 @@ class MLE(BaseParameterLearningEstimator):
 
     def _fit(self, node_data: torch.Tensor, parents_data: torch.Tensor = None):
         """
-        Maximum Likelihood Estimator.
 
         :param node_data: shape [n_samples]
         :param parents_data: shape [n_parents_features, n_samples]

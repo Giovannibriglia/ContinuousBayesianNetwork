@@ -16,7 +16,7 @@ if __name__ == "__main__":
     dag.add_edges_from([("obs_0", "reward"), ("action", "reward")])
 
     # Load the YAML file
-    with open("../conf/parameter_learning/mle.yaml", "r") as file:
+    with open("../conf/parameter_learning/brute_force.yaml", "r") as file:
         parameters_learning_config = yaml.safe_load(file)
 
     kwargs = {"log": False, "plot_prob": True}

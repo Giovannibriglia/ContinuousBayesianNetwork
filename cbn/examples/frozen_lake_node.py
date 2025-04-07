@@ -37,18 +37,18 @@ def frozen_lake_node(estimator_name: str, n_queries: int = 10, seed: int = 42):
 
     node1.fit(train_y, train_x)
 
-    query = {
+    """query = {
         "obs": obs[:n_queries].unsqueeze(-1),
         # "action": action[:n_queries].unsqueeze(-1),
         # "reward": train_y[:n_queries].unsqueeze(-1),
-    }
-
-    """query = {
-        "obs": torch.tensor([[10], [14], [4], [5]], device=device),
-        "action": torch.tensor([[1], [1], [3], [4]], device=device),
     }"""
 
-    pdfs, target_node_domains, parents_domains = node1.get_prob(query, N=16)
+    query = {
+        "obs": torch.tensor([[14], [4], [3]], device=device),
+        # "action": torch.tensor([[2], [1], [3]], device=device),
+    }
+
+    pdfs, target_node_domains, parents_domains = node1.get_prob(query, N=64)
 
     print("Pdf: ", pdfs.shape)
     print("Target domain: ", target_node_domains.shape)
@@ -57,5 +57,5 @@ def frozen_lake_node(estimator_name: str, n_queries: int = 10, seed: int = 42):
 
 if __name__ == "__main__":
     e = input("Estimator: ")
-    q = int(input("Number of queries: "))
+    q = 3  # int(input("Number of queries: "))
     frozen_lake_node(e, q)
