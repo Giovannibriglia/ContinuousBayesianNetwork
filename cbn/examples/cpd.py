@@ -32,7 +32,7 @@ if __name__ == "__main__":
     target_node = "reward"
     # Infer CPDs for node C given evidence for A and B
     evidence = {
-        # "reward": torch.tensor([[1], [0]], device="cuda"),
+        # "reward": torch.tensor([[1], [1], [1]], device="cuda"),
         "action": torch.tensor([[2], [2], [3]], device="cuda"),
         "obs_0": torch.tensor([[10], [14], [10]], device="cuda"),
     }

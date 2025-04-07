@@ -37,27 +37,22 @@ def frozen_lake_node(estimator_name: str, n_queries: int = 10, seed: int = 42):
 
     node1.fit(train_y, train_x)
 
-    query = {  # check n_queries
+    query = {
         "obs": obs[:n_queries].unsqueeze(-1),
-        "action": action[:n_queries].unsqueeze(-1),
+        # "action": action[:n_queries].unsqueeze(-1),
+        # "reward": train_y[:n_queries].unsqueeze(-1),
     }
-    # Assume query["obs"] and query["action"] are of shape [n_queries, 1]
-    condition = (query["obs"].squeeze(-1) == 14) & (query["action"].squeeze(-1) == 2)
 
-    # Get indices where condition is True
-    matching_indices = torch.nonzero(condition, as_tuple=False).squeeze()
+    """query = {
+        "obs": torch.tensor([[10], [14], [4], [5]], device=device),
+        "action": torch.tensor([[1], [1], [3], [4]], device=device),
+    }"""
 
-    # Check if any such index exists
-    if matching_indices.numel() > 0:
-        print(f"Matching index/indices: {matching_indices}")
-        print(matching_indices)
-    else:
-        print("No index found where action == 2 and obs == 14")
+    pdfs, target_node_domains, parents_domains = node1.get_prob(query, N=16)
 
-    pdf, domain = node1.get_prob(query)
-
-    print("Pdf: ", pdf.shape)
-    print("Domain: ", domain.shape)
+    print("Pdf: ", pdfs.shape)
+    print("Target domain: ", target_node_domains.shape)
+    print("Parents domain: ", parents_domains.shape)
 
 
 if __name__ == "__main__":

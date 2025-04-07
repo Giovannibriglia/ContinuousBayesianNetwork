@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, List, Tuple
 
 import networkx as nx
 import pandas as pd
 import torch
-from matplotlib import pyplot as plt
 
-from cbn.base import initial_uncertainty, min_tolerance
-from cbn.inference.exact import ExactInference
-from cbn.parameters_learning.mle import MaximumLikelihoodEstimator
-from cbn.utils import uniform_sample_tensor
+from tqdm import tqdm
+
+from cbn.base import BASE_MAX_CARDINALITY, KEY_MAX_CARDINALITY_FOR_DISCRETE
+from cbn.base.node import Node
 
 
 class BayesianNetwork:
@@ -20,267 +19,150 @@ class BayesianNetwork:
         data: pd.DataFrame,
         parameters_learning_config: Dict = None,
         inference_config: Dict = None,
+        **kwargs,
     ):
-        """
-        Initializes a Bayesian Network.
-
-        Args:
-            dag (nx.DiGraph): A directed acyclic graph representing the network structure.
-            data (pd.DataFrame, np.ndarray, or torch.Tensor): A dataset containing samples for all variables.
-        """
         if not nx.is_directed_acyclic_graph(dag):
             raise ValueError(
                 "The provided graph is not a directed acyclic graph (DAG)."
             )
 
-        self.dag = dag
-        self.nodes = list(dag.nodes)
+        self.initial_dag = dag
+        self.column_mapping = {node: i for i, node in enumerate(self.initial_dag.nodes)}
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-
-        self.data, self.column_mapping = self._data_to_tensors(data)
-
-        self.parameters_learning = self._setup_parameters_learning(
-            parameters_learning_config
+        kwargs["device"] = self.device if "device" not in kwargs else kwargs["device"]
+        self.min_tolerance = kwargs.get("min_tolerance", 1e-10)
+        self.uncertainty = kwargs.get("uncertainty", 1e-10)
+        self.max_cardinality_for_discrete_domain = kwargs.get(
+            KEY_MAX_CARDINALITY_FOR_DISCRETE, BASE_MAX_CARDINALITY
         )
 
-        self.inference = self._setup_inference(inference_config)
+        self.nodes_obj = None
 
-    @staticmethod
-    def _data_to_tensors(data, device_data_storage: str = "cpu"):
-        """Converts data to a PyTorch tensor and creates a node-to-column mapping."""
-        if isinstance(data, pd.DataFrame):
-            tensor_data = torch.tensor(
-                data.values.T, dtype=torch.float32, device=device_data_storage
+        self._setup_parameters_learning(data, parameters_learning_config, **kwargs)
+
+        self._setup_inference(inference_config)
+
+    def _setup_parameters_learning(self, data: pd.DataFrame, config: Dict, **kwargs):
+
+        estimator_name = config["estimator_name"]
+        self.nodes_obj = {
+            node: Node(
+                node,
+                estimator_name,
+                config,
+                self.get_parents(self.initial_dag, node),
+                **kwargs,
             )
-            columns_index_map = {
-                col_name: idx for idx, col_name in enumerate(data.columns)
-            }
-        else:
-            raise ValueError(
-                "Data must be a pd.DataFrame, np.ndarray, or torch.Tensor."
+            for node in self.initial_dag.nodes
+        }
+
+        pbar = tqdm(self.initial_dag.nodes, total=len(self.initial_dag.nodes))
+        # TODO: training in parallel
+        for node in pbar:
+            pbar.set_postfix(training_node=f"{node}")
+            node_data = torch.tensor(data[node], device=self.device)
+
+            node_parents = self.get_parents(self.initial_dag, node)
+            parents_data = (
+                torch.tensor(data[node_parents].values, device=self.device).T
+                if node_parents
+                else None
             )
-
-        return tensor_data, columns_index_map
-
-    def _setup_parameters_learning(self, config: Dict):
-        if config is None:
-            return MaximumLikelihoodEstimator({}, device=self.device)
-        else:
-            estimator_name = config["name"]
-            probability_estimator = config["probability_estimator"]
-            kwargs = config["kwargs"]
-
-            if estimator_name == "mle":
-                return MaximumLikelihoodEstimator(
-                    probability_estimator, self.device, **kwargs
-                )
-            elif estimator_name == "bayesian_estimator":
-                raise NotImplementedError
-            else:
-                raise ValueError(f"estimator type {estimator_name} is not defined")
+            self.nodes_obj[node].fit(node_data, parents_data)
+            pbar.set_postfix(desc="training done!")
 
     def _setup_inference(self, config: Dict):
-        if config is None:
-            return ExactInference(self, device=self.device)
-        else:
-            # TODO
-            return ExactInference(self, device=self.device)
+        # TODO
+        pass
 
-    def get_nodes(self):
-        return self.nodes
+    @staticmethod
+    def get_nodes(dag: nx.DiGraph):
+        return list(dag.nodes)
 
-    def get_dag(self):
-        return self.dag
-
-    def get_domain(self, node: int | str):
-        if isinstance(node, int):
-            return self.data[node].unique(sorted=True).to(self.device)
-        elif isinstance(node, str):
-            return (
-                self.data[self.column_mapping[node]].unique(sorted=True).to(self.device)
-            )
-        else:
-            raise ValueError(f"{node} type not supported.")
-
-    def get_ancestors(self, node: int | str):
+    def get_ancestors(self, dag: nx.DiGraph, node: int | str):
         if isinstance(node, str):
-            ancestors = nx.ancestors(self.dag, node)
+            ancestors = nx.ancestors(dag, node)
         elif isinstance(node, int):
             node_name = next(
                 (k for k, v in self.column_mapping.items() if v == node), None
             )
             if node_name is None:
                 return set()
-            ancestors = nx.ancestors(self.dag, node_name)
+            ancestors = nx.ancestors(dag, node_name)
         else:
             raise ValueError(f"{node} type not supported.")
 
         # Sort ancestors from farthest to closest using topological sorting
-        sorted_ancestors = list(
-            nx.topological_sort(self.dag.subgraph(ancestors | {node}))
-        )
+        sorted_ancestors = list(nx.topological_sort(dag.subgraph(ancestors | {node})))
         sorted_ancestors.remove(node)  # Remove the input node itself
         return sorted_ancestors
 
-    def get_parents(self, node: int | str):
+    def get_parents(self, dag: nx.DiGraph, node: int | str):
         if isinstance(node, str):
-            return list(self.dag.predecessors(node))
+            return list(dag.predecessors(node))
         elif isinstance(node, int):
             node_name = next(
                 (k for k, v in self.column_mapping.items() if v == node), None
             )
-            return list(self.dag.predecessors(node_name))
+            return list(dag.predecessors(node_name))
         else:
             raise ValueError(f"{node} type not supported.")
 
-    def get_children(self, node: int | str):
+    def get_children(self, dag: nx.DiGraph, node: int | str):
         if isinstance(node, str):
-            return list(self.dag.successors(node))
+            return list(dag.successors(node))
         elif isinstance(node, int):
             node_name = next(
                 (k for k, v in self.column_mapping.items() if v == node), None
             )
-            return list(self.dag.successors(node_name))
+            return list(dag.successors(node_name))
         else:
             raise ValueError(f"{node} type not supported.")
 
-    def get_structure(self):
+    @staticmethod
+    def get_structure(self, dag: nx.DiGraph):
         structure = {}
 
         # Get topological order to ensure parents appear before children
-        topological_order = list(nx.topological_sort(self.dag))
+        topological_order = list(nx.topological_sort(dag))
 
         for node in topological_order:
             # Get direct parents
-            parents = list(self.dag.predecessors(node))
+            parents = list(dag.predecessors(node))
             structure[node] = parents  # Store in dict
 
         return structure
 
-    def get_cpd_and_pdf(
+    def get_pdf(
         self,
         target_node: str,
         evidence: Dict,
-        uncertainty: float = initial_uncertainty,
-        normalize_pdf: bool = True,
-        points_to_evaluate: torch.Tensor = None,
-        N_max: int = None,
-    ):
+        N_max: int = 1024,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
 
-        :param N_max:
-        :param points_to_evaluate:
-        :param normalize_pdf:
-        :param target_node:
-        :param evidence: {"feat": torch.Tensor with shape [batch_size]
-        :param uncertainty: float
+        :param target_node: str
+        :param evidence: [n_queries, n_features, 1]
+        :param N_max: int
         :return:
         """
 
-        if len(evidence.keys()) > 0:
-            evidence_features = list(evidence.keys())
-            data_features = [
-                self.column_mapping[feature] for feature in evidence_features
-            ]
+        target_node_parents = self.get_parents(self.initial_dag, target_node)
+        query = {}
 
-            n_queries = evidence[evidence_features[0]].shape[0]
-            n_combinations = evidence[evidence_features[0]].shape[1]
-
-            if target_node not in evidence_features:
-                data_features.append(self.column_mapping[target_node])
-                target_node_index = len(data_features) - 1
+        for feature, values in evidence.items():
+            if feature in target_node_parents:
+                query[feature] = values
             else:
-                target_node_index = evidence_features.index(target_node)
+                print(
+                    f"{feature} is not parent of {target_node}, for this reason will not be considered in the probability computation."
+                )
+        domains, pdfs = self.nodes_obj[target_node].get_prob(query, N_max)
 
-            evidence_tensor = torch.zeros(
-                (n_queries, len(evidence_features), n_combinations)
-            )
-            for query_n in range(n_queries):
-                for feat_ev_idx, feat_ev in enumerate(evidence_features):
-                    if feat_ev in evidence.keys():
-                        evidence_tensor[query_n, feat_ev_idx, :] = evidence[feat_ev][
-                            query_n
-                        ]
-
-            filtered_data = (
-                self.data[data_features].unsqueeze(0).expand(n_queries, -1, -1)
-            )
-        else:
-            target_node_index = 0
-            n_queries = (
-                points_to_evaluate.shape[0] if points_to_evaluate is not None else 1
-            )
-            evidence_tensor = None
-            filtered_data = self.data[self.column_mapping[target_node]].unsqueeze(0)
-
-        cpd = self.parameters_learning.get_cpd(
-            target_node_index, evidence_tensor, filtered_data, uncertainty
-        )
-
-        node_domain = uniform_sample_tensor(
-            self.get_domain(target_node).unsqueeze(0).expand(n_queries, -1), N_max
-        )
-        pdf = cpd.log_prob(node_domain)
-
-        if normalize_pdf:
-            pdf_normalized = self._safe_normalize_pdf(pdf)
-
-            # Assert that each slice in the last dimension sums to 1
-            assert torch.allclose(
-                pdf_normalized.sum(dim=-1),
-                torch.ones_like(pdf_normalized.sum(dim=-1)),
-                atol=min_tolerance,
-            ), "Normalization failed: Sums are not all 1."
-
-            if points_to_evaluate is None:
-                if target_node in evidence.keys():
-                    values_to_evaluate, _ = evidence[
-                        target_node
-                    ].sort()  # [n_queries, n_values]
-                    # print("1")
-                else:
-                    values_to_evaluate = node_domain.expand(
-                        n_queries, -1
-                    )  # [n_queries, n_values]
-                    # print("2")
-            else:
-                values_to_evaluate, _ = (
-                    points_to_evaluate.sort()
-                )  # [n_queries, n_values]
-                # print("3")
-
-            if not torch.equal(node_domain, values_to_evaluate):
-                # node_domain shape [n_queries, n_tot_values]
-                # values_to_evaluate [n_queries, n_values]
-
-                # Find indices where node_domain == values_to_evaluate
-                indices = torch.zeros_like(values_to_evaluate, dtype=torch.long)
-
-                for i in range(n_queries):
-                    indices[i] = torch.where(
-                        node_domain[i].unsqueeze(0)
-                        == values_to_evaluate[i].unsqueeze(1)
-                    )[1]
-
-                # Gather the corresponding pdf values
-                pdf_normalized = torch.gather(
-                    pdf_normalized, 1, indices
-                )  # [n_queries, n_values]
-
-            assert (
-                pdf_normalized.dim() == 2
-                and pdf_normalized.shape == values_to_evaluate.shape
-            ), ValueError(
-                f"pdf of {target_node} has shape: {pdf_normalized.shape}, it should be: {values_to_evaluate.shape}"
-            )
-            return cpd, pdf_normalized, values_to_evaluate
-        else:
-            return cpd, pdf, node_domain
+        return domains, pdfs
 
     @staticmethod
-    def _safe_normalize_pdf(
-        pdf: torch.Tensor, epsilon: float = min_tolerance
-    ) -> torch.Tensor:
+    def _safe_normalize_pdf(pdf: torch.Tensor, epsilon: float) -> torch.Tensor:
         """
         Safely normalize a PDF along the `n_values` dimension, handling large or negative values.
 
@@ -304,54 +186,16 @@ class BayesianNetwork:
     def infer(
         self,
         target_node: str,
-        evidence: Dict,
-        do: Dict = None,
-        uncertainty: float = initial_uncertainty,
-        plot_prob: bool = False,
-        N_max: int = None,
-    ):
-        if evidence != {}:
-            evidence_features = list(evidence.keys())
-            if target_node in evidence_features:
-                raise ValueError(
-                    f"Cannot infer '{target_node}' because it is already provided as evidence."
-                )
-
-        return self.inference.infer(
-            target_node, evidence, do, uncertainty, plot_prob, N_max
-        )
-
-    @staticmethod
-    def plot_prob(
-        prob: torch.Tensor, points: torch.Tensor, fontsize: int = 16, title: str = None
+        evidence: Dict[str, torch.Tensor],
+        do: List[str],
+        N_max: int = 1024,
     ):
         """
-        Plot conditional probability distributions.
-        :param prob: torch.Tensor. Shape [n_queries, n_values].
-        :param points: torch.Tensor. Shape [n_queries, n_values].
-        :return:
+
+        :param target_node:
+        :param evidence: for each key a torch tensor with shape [n_queries, 1].
+        :param do: list of str
+        :param N_max:
+        :return: [n_queries, n_values]
         """
-
-        plt.figure(dpi=500, figsize=(12, 7))
-        plt.title(title, fontsize=fontsize + 4)
-        prob = prob.cpu().numpy()
-        points = points.cpu().numpy()
-
-        for query_n in range(prob.shape[0]):
-            plt.plot(
-                points[query_n, :],
-                prob[query_n, :],
-                label=f"Query #{query_n}",
-                linewidth=4,
-            )
-
-        plt.xticks(fontsize=fontsize)
-        plt.yticks(fontsize=fontsize)
-        plt.xlabel("Domain", fontsize=fontsize)
-        plt.ylabel("Probability", fontsize=fontsize)
-
-        plt.ylim(ymin=-0.00001, ymax=1.00001)
-        plt.legend(loc="best", fontsize=fontsize)
-        plt.grid(True)
-        plt.tight_layout()
-        plt.show()
+        raise NotImplementedError

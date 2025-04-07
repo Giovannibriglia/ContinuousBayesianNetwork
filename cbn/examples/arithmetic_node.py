@@ -31,26 +31,23 @@ def arithmetic_node(
 
     B = torch.linspace(1, 100, n_samples, device=device)
     C = torch.linspace(40, 60, n_samples, device=device)
-    D = torch.linspace(40, 60, n_samples, device=device)
-    E = torch.linspace(40, 60, n_samples, device=device)
+    D = torch.linspace(50, 55, n_samples, device=device)
+    E = torch.linspace(700, 750, n_samples, device=device)
     parents_data = torch.cat(
         [B.unsqueeze(0), C.unsqueeze(0), D.unsqueeze(0), E.unsqueeze(0)], dim=0
     )
 
-    node_data = 4 * B + C / 10 * E + torch.sqrt(D)
+    node_data = 4 * B + C / 10 + E + torch.sqrt(D)
 
     node1.fit(node_data, parents_data)
 
-    list_values = range(0, n_samples, 1)
-
-    random_queries = random.sample(list_values, n_queries)
     # print(random_queries)
-    print("Ground truth: ", node_data[random_queries])
+    print("Ground truth: ", node_data[:n_queries])
     query = {  # check n_queries
-        "B": B[random_queries].unsqueeze(-1),
-        "C": C[random_queries].unsqueeze(-1),
-        "D": D[random_queries].unsqueeze(-1),
-        "E": E[random_queries].unsqueeze(-1),
+        "B": B[:n_queries].unsqueeze(-1),
+        "C": C[:n_queries].unsqueeze(-1),
+        "D": D[:n_queries].unsqueeze(-1),
+        # "E": E[:n_queries].unsqueeze(-1),
     }
 
     pdf, domain = node1.get_prob(query, N=4)
