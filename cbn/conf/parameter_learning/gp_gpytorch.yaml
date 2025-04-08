@@ -11,8 +11,6 @@ model:
 
 optimizer:
   name: "Adam"
-  params:
-    lr: 0.001
 
 train:
-  n_epochs: 100
+  n_epochs: 10000

@@ -44,21 +44,21 @@ def arithmetic_node(
     # print(random_queries)
     print("Ground truth: ", node_data[:n_queries])
     query = {  # check n_queries
-        # "B": B[:n_queries].unsqueeze(-1),
-        # "C": C[:n_queries].unsqueeze(-1),
+        "B": B[:n_queries].unsqueeze(-1),
+        "C": C[:n_queries].unsqueeze(-1),
         # "D": D[:n_queries].unsqueeze(-1),
         # "E": E[:n_queries].unsqueeze(-1),
     }
 
-    pdfs, target_node_domains, parents_domains = node1.get_prob(query, N=6)
-    #
+    pdfs, target_node_domains, parents_domains = node1.get_prob(query, N=16)
+
     print("Pdf: ", pdfs.shape)
     print("Target domain: ", target_node_domains.shape)
     print("Parents domain: ", parents_domains.shape)
 
 
 if __name__ == "__main__":
-    e = "mle"  # input("Estimator: ")
-    n = 1000  # int(input("Number of samples for each feature: "))
-    q = 1  # int(input("Number of queries: "))
+    e = input("Estimator: ")
+    n = int(input("Number of samples for each feature: "))
+    q = int(input("Number of queries: "))
     arithmetic_node(e, n, q)

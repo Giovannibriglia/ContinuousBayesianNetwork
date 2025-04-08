@@ -143,7 +143,8 @@ class Node:
         # Set up parent's query.
         parents_query, parents_domains = self._setup_parents_query(query, N)
         total_parents_combinations = parents_query.shape[2]
-        print(total_parents_combinations)
+        # print("Total parents combinations = (N)^(n_parents):  ", total_parents_combinations)
+
         # parents_query has shape [n_queries, n_parents, total_parents_combinations]
         # parents_domains is a list of length n_parents, each tensor of shape [n_queries, d_i]
 
@@ -172,6 +173,7 @@ class Node:
             dtype=self.fixed_dtype,
             device=self.device,
         )
+
         if total_parents_combinations > 1:
             new_parents_query = parents_query.permute(2, 1, 0)
             for i in range(new_parents_query.shape[2]):
@@ -184,7 +186,7 @@ class Node:
                 pdfs[i, :, :] = self.estimator.get_prob(new_target_node_domains, q)
         else:
             # For each configuration (Cartesian product index), compute the pdf.
-            for i in tqdm(range(total_parents_combinations)):
+            for i in tqdm(range(total_parents_combinations), desc="Computing cpds..."):
                 # q has shape [n_queries, n_parents, 1]: one value per parent for this configuration.
                 q = parents_query[:, :, i, None]
                 # Each call returns [n_queries, n_samples_node]
@@ -406,59 +408,106 @@ class Node:
 
         # For each query, create a figure with one subplot per parent.
         for q in range(n_queries):
+            n_parents = len(self.parents_names)
             n_cols = min(n_parents, 2)
             n_rows = math.ceil(n_parents / n_cols)
-            fig = plt.figure(figsize=(8 * n_cols, 4 * n_rows), dpi=500)
 
+            fig = plt.figure(figsize=(8 * n_cols, 4.5 * n_rows), dpi=300)
             subtitle = f"Query {q} - P({self.node_name}|"
-            # For each parent, average (marginalize) over all other parent's dimensions.
-            # pdfs_np[q] has shape [d0, d1, ..., d_{n_parents-1}, n_samples_node]
+
             for p in range(n_parents):
-                ax = fig.add_subplot(n_rows, n_cols, p + 1, projection="3d")
-
-                # Compute the axes over which to average: all parent axes except p.
-                n_parent_axes = len(pdfs_np[q].shape) - 1  # number of parent dimensions
-                axes_to_avg = tuple(i for i in range(n_parent_axes) if i != p)
-                # Marginalize over all other parents: result shape will be (d_p, n_samples_node)
-                pdf_plot = np.mean(pdfs_np[q], axis=axes_to_avg)
-
-                # Get the parent's domain values from parents_domains_np.
-                # parents_domains_np[q, p, :] has shape (d_p,)
+                # Determine parent and node values
                 parent_vals = parents_domains_np[q, p, :]
-                node_vals = node_domains_np[q]  # shape (n_samples_node,)
-
+                node_vals = node_domains_np[q]
                 unique_parent_vals = np.unique(parent_vals)
+
+                # Compute marginal over all other parent axes
+                n_parent_axes = len(pdfs_np[q].shape) - 1
+                axes_to_avg = tuple(i for i in range(n_parent_axes) if i != p)
+                pdf_plot = np.max(pdfs_np[q], axis=axes_to_avg)
 
                 if len(unique_parent_vals) > 1:
                     subtitle += f"{self.parents_names[p]}, "
-                    # Create a meshgrid: X for node domain, Y for parent domain.
-                    P, N_ = np.meshgrid(parent_vals, node_vals, indexing="ij")
-                    # pdf_plot should have shape [d_p, n_samples_node]
+                    ax = fig.add_subplot(n_rows, n_cols, p + 1, projection="3d")
+
+                    # Plot 3D surface
+                    P, N = np.meshgrid(parent_vals, node_vals, indexing="ij")
                     surf = ax.plot_surface(
-                        N_,
+                        N,
                         P,
                         pdf_plot,
                         cmap="viridis",
                         edgecolor="k",
-                        linewidth=0.8,
-                        alpha=0.8,
+                        linewidth=0.5,
+                        alpha=0.9,
                     )
+
                     ax.set_title(f"{self.parents_names[p]}")
                     ax.set_xlabel(f"Domain of {self.node_name}")
                     ax.set_ylabel(f"Domain of {self.parents_names[p]}")
                     ax.set_zlabel("PDF")
                     fig.colorbar(surf, ax=ax, shrink=0.7, aspect=15)
+
                 else:
                     subtitle += f"{self.parents_names[p]}={unique_parent_vals[0]}, "
-                    # Only one value for this parent: use a simple 2D line plot.
-                    # pdf_plot is of shape [1, n_samples_node] -> squeeze to [n_samples_node]
                     ax = fig.add_subplot(n_rows, n_cols, p + 1)
+
+                    # 2D line plot
                     ax.plot(node_vals, pdf_plot[0], marker="o")
                     ax.set_title(f"{self.parents_names[p]} = {unique_parent_vals[0]}")
                     ax.set_xlabel(f"Domain of {self.node_name}")
                     ax.set_ylabel("PDF")
-                    ax.set_ylim(ymin=-0.001, ymax=1.001)
+                    ax.set_ylim(-0.01, 1.01)
                     ax.grid(True)
+
+            # Final subtitle formatting
+            subtitle = subtitle.rstrip(", ") + ")"
+            fig.suptitle(subtitle, fontsize=14)
+            fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+            plt.show()
+
+        " *********************************************************************************************************** "
+
+        for q in range(n_queries):
+            fig = plt.figure(dpi=500)
+
+            subtitle = f"Query {q} - P({self.node_name}|"
+            # For each parent, average (marginalize) over all other parent's dimensions.
+            # pdfs_np[q] has shape [d0, d1, ..., d_{n_parents-1}, n_samples_node]
+
+            # Compute the axes over which to average: all parent axes except p.
+            n_parent_axes = len(pdfs_np[q].shape) - 1  # number of parent dimensions
+            axes_to_avg = tuple(i for i in range(n_parent_axes))
+            # Marginalize over all other parents: result shape will be (d_p, n_samples_node)
+            pdf_plot = np.max(pdfs_np[q], axis=axes_to_avg)
+
+            # Get the parent's domain values from parents_domains_np.
+            # parents_domains_np[q, p, :] has shape (d_p,)
+            parent_vals = parents_domains_np[q, :, :]
+            node_vals = node_domains_np[q]  # shape (n_samples_node,)
+
+            for p in range(n_parents):
+                if len(np.unique(parent_vals[p])) > 1:
+                    subtitle += f"{self.parents_names[p]}, "
+                else:
+                    subtitle += (
+                        f"{self.parents_names[p]}={np.unique(parent_vals[p])[0]}, "
+                    )
+
+            max_idx = np.argmax(pdf_plot)
+            max_value = node_vals[max_idx]
+            point_max = np.max(pdf_plot)
+            # Only one value for this parent: use a simple 2D line plot.
+            # pdf_plot is of shape [1, n_samples_node] -> squeeze to [n_samples_node]
+            plt.plot(node_vals, pdf_plot)  # , marker="o")
+            plt.scatter(
+                max_value, point_max, c="red", s=100, label=f"max={max_value:.2f}"
+            )
+            plt.xlabel(f"Domain of {self.node_name}")
+            plt.ylabel("PDF")
+            plt.ylim(ymin=-0.01, ymax=1.01)
+            plt.legend(loc="best")
+            plt.grid(True)
 
             subtitle = subtitle[:-2]
             subtitle += ")"

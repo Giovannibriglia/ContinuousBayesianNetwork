@@ -151,7 +151,10 @@ class GP_gpytorch(BaseParameterLearningEstimator):
                             )
                         )
                     ) * torch.exp(-0.5 * ((point_to_evaluate[i] - mu) / std) ** 2)
-                    pdfs[i] = pdf / torch.max(pdf)
+                    if torch.max(pdf) != 0:
+                        pdfs[i] = pdf / torch.max(pdf)
+                    else:
+                        pdfs[i] = pdf
 
         return pdfs
 
