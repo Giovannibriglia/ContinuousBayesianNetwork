@@ -424,7 +424,8 @@ class Node:
                 # Compute marginal over all other parent axes
                 n_parent_axes = len(pdfs_np[q].shape) - 1
                 axes_to_avg = tuple(i for i in range(n_parent_axes) if i != p)
-                pdf_plot = np.max(pdfs_np[q], axis=axes_to_avg)
+                pdf_plot = np.sum(pdfs_np[q], axis=axes_to_avg)
+                pdf_plot = pdf_plot / pdf_plot.sum()
 
                 if len(unique_parent_vals) > 1:
                     subtitle += f"{self.parents_names[p]}, "
@@ -447,13 +448,12 @@ class Node:
                     ax.set_ylabel(f"Domain of {self.parents_names[p]}")
                     ax.set_zlabel("PDF")
                     fig.colorbar(surf, ax=ax, shrink=0.7, aspect=15)
-
                 else:
                     subtitle += f"{self.parents_names[p]}={unique_parent_vals[0]}, "
                     ax = fig.add_subplot(n_rows, n_cols, p + 1)
-
+                    mean_pdf = np.mean(pdf_plot, axis=0)
                     # 2D line plot
-                    ax.plot(node_vals, pdf_plot[0], marker="o")
+                    ax.plot(node_vals, mean_pdf, marker="o")
                     ax.set_title(f"{self.parents_names[p]} = {unique_parent_vals[0]}")
                     ax.set_xlabel(f"Domain of {self.node_name}")
                     ax.set_ylabel("PDF")
@@ -479,8 +479,8 @@ class Node:
             n_parent_axes = len(pdfs_np[q].shape) - 1  # number of parent dimensions
             axes_to_avg = tuple(i for i in range(n_parent_axes))
             # Marginalize over all other parents: result shape will be (d_p, n_samples_node)
-            pdf_plot = np.max(pdfs_np[q], axis=axes_to_avg)
-
+            pdf_plot = np.sum(pdfs_np[q], axis=axes_to_avg)
+            pdf_plot = pdf_plot / pdf_plot.sum()
             # Get the parent's domain values from parents_domains_np.
             # parents_domains_np[q, p, :] has shape (d_p,)
             parent_vals = parents_domains_np[q, :, :]
