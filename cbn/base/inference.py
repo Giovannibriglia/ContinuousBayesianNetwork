@@ -16,9 +16,8 @@ class BaseInference(ABC):
         raise NotImplementedError
 
     def infer(self, target_node: str, evidence: Dict, do: Dict, **kwargs):
-
-        self._infer()
+        self._infer(target_node, evidence, do, **kwargs)
 
     @abstractmethod
-    def _infer(self, node_data: torch.Tensor, parents_data: torch.Tensor = None):
+    def _infer(self, target_node: str, evidence: Dict, do: Dict, **kwargs):
         raise NotImplementedError

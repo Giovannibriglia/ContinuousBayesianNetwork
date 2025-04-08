@@ -42,6 +42,9 @@ class GP_gpytorch(BaseParameterLearningEstimator):
         self._setup_model(config, **kwargs)
         self.model = None
 
+        self.prior_mean = None
+        self.prior_var = None
+
     def _setup_model(self, config: Dict, **kwargs):
         config_model = config.get("model", {})
         self.config_optimizer = config.get("optimizer")
@@ -116,6 +119,9 @@ class GP_gpytorch(BaseParameterLearningEstimator):
             if self.if_log:
                 bar.set_postfix(loss=f"{loss.item():.4f}")
 
+        self.prior_mean = torch.mean(node_data.to(torch.float32))
+        self.prior_var = torch.var(node_data.to(torch.float32))
+
     def _get_prob(self, point_to_evaluate: torch.Tensor, query: torch.Tensor = None):
         """
         Given a query (X*), return an approximate PDF and domain grid for each query point.
@@ -126,20 +132,26 @@ class GP_gpytorch(BaseParameterLearningEstimator):
         if self.model is None:
             raise ValueError("Model not trained yet. Call fit() before get_prob().")
 
-        n_queries, n_parents, n_values = query.shape
+        n_queries = query.shape[0] if query is not None else 1
 
         # Eval mode
-        self.model.eval()
-        self.likelihood.eval()
+        self.model.eval().to(torch.float32)
+        self.likelihood.eval().to(torch.float32)
 
         pdfs = torch.empty((n_queries, point_to_evaluate.shape[1]), device=self.device)
 
         with torch.no_grad(), gpytorch.settings.fast_pred_var():
             for i in range(n_queries):
-                pred_dist = self.likelihood(self.model(query[i].T))
-                means = pred_dist.mean
-                variances = pred_dist.variance
-
+                if query is not None:
+                    pred_dist = self.likelihood(self.model(query[i].T))
+                    means = pred_dist.mean
+                    variances = pred_dist.variance
+                    # print(means.shape, variances.shape)
+                else:
+                    means = self.prior_mean.unsqueeze(0)
+                    variances = self.prior_var.unsqueeze(0)
+                    # print(means, variances)
+                    # print(means.shape, variances.shape)
                 for mu, var in zip(means, variances):
                     std = torch.sqrt(var)
                     pdf = (

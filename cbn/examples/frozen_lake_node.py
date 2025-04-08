@@ -38,8 +38,8 @@ def frozen_lake_node(estimator_name: str, n_queries: int = 10, seed: int = 42):
     node1.fit(train_y, train_x)
 
     query = {
-        "obs": obs[:n_queries].unsqueeze(-1),
-        "action": action[:n_queries].unsqueeze(-1),
+        # "obs": obs[:n_queries].unsqueeze(-1),
+        # "action": action[:n_queries].unsqueeze(-1),
         # "reward": train_y[:n_queries].unsqueeze(-1),
     }
 

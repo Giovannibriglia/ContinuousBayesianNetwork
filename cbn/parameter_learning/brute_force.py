@@ -52,7 +52,7 @@ class BruteForce(BaseParameterLearningEstimator):
         self.mle_tensor[:, :-1] = unique_rows
         self.mle_tensor[:, -1] = probs
 
-    def _get_prob(self, point_to_evaluate: torch.Tensor, query: torch.Tensor = None):
+    def _get_prob2(self, point_to_evaluate: torch.Tensor, query: torch.Tensor = None):
         """
         Compute P(node_value | parents) for each query in 'query' and
         each candidate node value in 'domain'.
@@ -66,11 +66,16 @@ class BruteForce(BaseParameterLearningEstimator):
         assert (
             self.mle_tensor is not None
         ), "MLE tensor not fitted yet. Call _fit() first."
-        assert (
-            query.dim() == 3 and query.shape[-1] == 1
-        ), f"Query must be [n_queries, n_parents, 1]. Got {query.shape}."
+        if query:
+            assert (
+                query.dim() == 3 and query.shape[-1] == 1
+            ), f"Query must be [n_queries, n_parents, 1]. Got {query.shape}."
 
-        n_queries, n_parents, _ = query.shape
+            n_queries, n_parents, _ = query.shape
+        else:
+            n_queries = 1
+            n_parents = 0
+
         n_node_values = point_to_evaluate.shape[1]
 
         if point_to_evaluate.shape[0] != n_queries:
@@ -158,6 +163,80 @@ class BruteForce(BaseParameterLearningEstimator):
                 )"""
 
         # --- 6) Compute conditional PDF ---
+        eps = 1e-10
+        pdf = joint_probs / (parent_probs + eps)
+        pdf = pdf.view(n_queries, n_node_values)
+
+        return pdf
+
+    def _get_prob(self, point_to_evaluate: torch.Tensor, query: torch.Tensor = None):
+        """
+        Compute P(node_value | parents) for each query in 'query' and
+        each candidate node value in 'point_to_evaluate'.
+
+        :param point_to_evaluate: [n_queries, n_values]
+        :param query:  [n_queries, n_parents, 1] or None
+        :return:       [n_queries, n_values] of conditional probabilities
+        """
+        # --- 1) Basic checks ---
+        assert (
+            self.mle_tensor is not None
+        ), "MLE tensor not fitted yet. Call _fit() first."
+
+        n_node_values = point_to_evaluate.shape[1]
+
+        # --- 2) Extract MLE data ---
+        mle_data = self.mle_tensor[:, :-1]  # [n_mle, n_parents + 1]
+        mle_probs = self.mle_tensor[:, -1]  # [n_mle]
+
+        if query is None:
+            # Handle marginal case: P(node_value)
+            node_values = mle_data[:, -1]  # [n_mle]
+            pdf = torch.zeros_like(point_to_evaluate)
+
+            for i in range(point_to_evaluate.shape[0]):  # n_queries
+                for j, value in enumerate(point_to_evaluate[i]):
+                    match = node_values == value
+                    pdf[i, j] = mle_probs[match].sum() if match.any() else 0.0
+            return pdf
+
+        # --- Else: conditional case P(node_value | parents) ---
+        assert (
+            query.dim() == 3 and query.shape[-1] == 1
+        ), f"Query must be [n_queries, n_parents, 1]. Got {query.shape}."
+
+        n_queries, n_parents, _ = query.shape
+
+        if point_to_evaluate.shape[0] != n_queries:
+            raise ValueError(
+                f"'point_to_evaluate' first dimension must match number of queries. "
+                f"Got {point_to_evaluate.shape[0]}, expected {n_queries}."
+            )
+
+        parent_query = query.squeeze(-1)  # => [n_queries, n_parents]
+        parent_query_exp = parent_query.unsqueeze(1).expand(
+            -1, n_node_values, -1
+        )  # [n_queries, n_node_values, n_parents]
+        full_query = torch.cat(
+            [parent_query_exp, point_to_evaluate.unsqueeze(-1)], dim=-1
+        )  # [n_queries, n_node_values, n_parents + 1]
+        flat_query = full_query.view(
+            -1, n_parents + 1
+        )  # [n_queries * n_node_values, n_parents + 1]
+
+        # --- Joint match: P(parents + node_value) ---
+        joint_matches = (flat_query[:, None, :] == mle_data[None, :, :]).all(dim=-1)
+        joint_probs = (joint_matches * mle_probs).sum(dim=-1)
+
+        # --- Parent match: P(parents) ---
+        flat_parents = flat_query[:, :-1]
+        mle_parents = mle_data[:, :-1]
+        parent_matches = (flat_parents[:, None, :] == mle_parents[None, :, :]).all(
+            dim=-1
+        )
+        parent_probs = (parent_matches * mle_probs).sum(dim=-1)
+
+        # --- Conditional PDF ---
         eps = 1e-10
         pdf = joint_probs / (parent_probs + eps)
         pdf = pdf.view(n_queries, n_node_values)

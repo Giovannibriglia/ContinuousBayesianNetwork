@@ -8,7 +8,6 @@ from cbn.base.bayesian_network import BayesianNetwork
 
 if __name__ == "__main__":
     # Create a dataset
-
     data = pd.read_pickle("frozen_lake.pkl")
     data.columns = ["obs_0", "action", "reward"]
 
@@ -19,13 +18,18 @@ if __name__ == "__main__":
     with open("../conf/parameter_learning/brute_force.yaml", "r") as file:
         parameters_learning_config = yaml.safe_load(file)
 
-    kwargs = {"log": False, "plot_prob": True}
+    # Load the YAML file
+    with open("../conf/inference/exact.yaml", "r") as file:
+        inference_config = yaml.safe_load(file)
+
+    kwargs = {"log": False, "plot_prob": False}
 
     # Initialize the Bayesian Network
     bn = BayesianNetwork(
         dag=dag,
         data=data,
         parameters_learning_config=parameters_learning_config,
+        inference_config=inference_config,
         **kwargs,
     )
 
@@ -33,15 +37,17 @@ if __name__ == "__main__":
     # Infer CPDs for node C given evidence for A and B
     evidence = {
         # "reward": torch.tensor([[1], [1], [1]], device="cuda"),
-        "action": torch.tensor([[2], [2], [3]], device="cuda"),
-        "obs_0": torch.tensor([[10], [14], [10]], device="cuda"),
+        "action": torch.tensor([[1], [2], [3]], device="cuda"),
+        # "obs_0": torch.tensor([[10], [14], [10]], device="cuda"),
     }
-    domain_values, pdf = bn.get_pdf(
+
+    pdfs, target_node_domains, parents_domains = bn.get_pdf(
         target_node,
         evidence,
         N_max=16,
     )
-    print("PDF: ", pdf.shape)
-    print("Domain: ", domain_values.shape)
+    print("PDF: ", pdfs.shape)
+    print("Target node Domains: ", target_node_domains.shape)
+    print("Parents Domains: ", parents_domains.shape)
 
-    # bn.plot_prob(pdf, domain_values)
+    pdf, domain = bn.infer(target_node, evidence, N_max=64, plot_prob=True)

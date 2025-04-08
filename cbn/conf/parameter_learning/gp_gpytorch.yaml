@@ -13,4 +13,4 @@ optimizer:
   name: "Adam"
 
 train:
-  n_epochs: 10000
+  n_epochs: 100

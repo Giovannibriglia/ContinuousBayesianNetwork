@@ -1,7 +1,7 @@
 import os
 import time
 from datetime import datetime
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import gymnasium as gym
 import networkx as nx
@@ -203,6 +203,7 @@ def report_metrics_as_latex(
     y_true,
     if_discrete,
     computation_time,
+    training_time,
     xlsx_path="report.xlsx",
     txt_path="report.txt",
     confidence_interval: float = 0.95,
@@ -293,6 +294,7 @@ def report_metrics_as_latex(
                 np.nan
             )  # returns a tuple
 
+    metrics_dict["Training Time (s)"] = training_time
     # Add computation time
     metrics_dict["Computation Time (s)"] = computation_time
 
@@ -392,17 +394,35 @@ def benchmarking_df(
     dag: nx.DiGraph,
     data: pd.DataFrame,
     target_node: str,
+    parameters_learning_config: Dict,
+    inference_config: Dict,
     discrete_target: bool,
     batch_size: int = 64,
     task_name: str = "task",
     file_path: str = "",
+    test_size: float = 0.2,
 ) -> np.ndarray:
     from cbn.base.bayesian_network import BayesianNetwork
 
-    data_train = data[: int(len(data) / 2)]
-    data_test = data[int(len(data) / 2) :]
+    if test_size > 0:
+        data_train = data[: int(len(data) * (1 - test_size))]
+        data_test = data[int(len(data) * (1 - test_size)) :]
+    else:
+        data_train = data
+        data_test = data
 
-    cbn = BayesianNetwork(dag, data_train)
+    kwargs = {"log": False, "plot_prob": False}
+
+    training_time = time.time()
+    # Initialize the Bayesian Network
+    cbn = BayesianNetwork(
+        dag=dag,
+        data=data_train,
+        parameters_learning_config=parameters_learning_config,
+        inference_config=inference_config,
+        **kwargs,
+    )
+    training_time = time.time() - training_time
 
     dict_values = {
         feat: torch.tensor(data_test[feat].values, device="cpu")
@@ -457,6 +477,7 @@ def benchmarking_df(
         true_values,
         discrete_target,
         computation_time,
+        training_time,
         xlsx_path=f"{file_path}/cbn.xlsx",
         txt_path=f"{file_path}/cbn.txt",
     )

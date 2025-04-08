@@ -3,7 +3,6 @@ import random
 from typing import Dict, List, Tuple
 
 import torch
-from tqdm import tqdm
 
 from cbn.base import (
     BASE_MAX_CARDINALITY,
@@ -142,7 +141,9 @@ class Node:
 
         # Set up parent's query.
         parents_query, parents_domains = self._setup_parents_query(query, N)
-        total_parents_combinations = parents_query.shape[2]
+        total_parents_combinations = (
+            parents_query.shape[2] if parents_query is not None else 0
+        )
         # print("Total parents combinations = (N)^(n_parents):  ", total_parents_combinations)
 
         # parents_query has shape [n_queries, n_parents, total_parents_combinations]
@@ -151,9 +152,7 @@ class Node:
         # Get target node evaluation points.
         if node_query is None:
             target_node_domains = (
-                self._sample_domain(self.node_name, N)
-                .unsqueeze(0)
-                .expand(n_queries, -1)
+                self.sample_domain(self.node_name, N).unsqueeze(0).expand(n_queries, -1)
             )
         else:
             target_node_domains = node_query
@@ -174,23 +173,26 @@ class Node:
             device=self.device,
         )
 
-        if total_parents_combinations > 1:
-            new_parents_query = parents_query.permute(2, 1, 0)
-            for i in range(new_parents_query.shape[2]):
-                q = new_parents_query[:, :, i, None]
-                new_target_node_domains = (
-                    target_node_domains[i]
-                    .unsqueeze(0)
-                    .expand(total_parents_combinations, -1)
-                )
-                pdfs[i, :, :] = self.estimator.get_prob(new_target_node_domains, q)
+        if len(self.parents_names) > 0:
+            if total_parents_combinations > 1:
+                new_parents_query = parents_query.permute(2, 1, 0)
+                for i in range(new_parents_query.shape[2]):
+                    q = new_parents_query[:, :, i, None]
+                    new_target_node_domains = (
+                        target_node_domains[i]
+                        .unsqueeze(0)
+                        .expand(total_parents_combinations, -1)
+                    )
+                    pdfs[i, :, :] = self.estimator.get_prob(new_target_node_domains, q)
+            else:
+                # For each configuration (Cartesian product index), compute the pdf.
+                for i in range(total_parents_combinations):
+                    # q has shape [n_queries, n_parents, 1]: one value per parent for this configuration.
+                    q = parents_query[:, :, i, None]
+                    # Each call returns [n_queries, n_samples_node]
+                    pdfs[:, i, :] = self.estimator.get_prob(target_node_domains, q)
         else:
-            # For each configuration (Cartesian product index), compute the pdf.
-            for i in tqdm(range(total_parents_combinations), desc="Computing cpds..."):
-                # q has shape [n_queries, n_parents, 1]: one value per parent for this configuration.
-                q = parents_query[:, :, i, None]
-                # Each call returns [n_queries, n_samples_node]
-                pdfs[:, i, :] = self.estimator.get_prob(target_node_domains, q)
+            pdfs = self.estimator.get_prob(target_node_domains)
 
         # Reshape pdfs to include a separate dimension for each parent.
         new_shape = [n_queries] + parent_dims + [n_samples_node]
@@ -216,7 +218,7 @@ class Node:
         # Reorder query according to the sorted keys.
         query = {key: query[key] for key in query_features}
 
-        if query_features:
+        if len(query_features) > 0:
             n_start_queries = query[query_features[0]].shape[0]
             # Ensure all provided query features are valid parents.
             assert all(
@@ -247,7 +249,7 @@ class Node:
                     else:
                         # Sample uniformly from the parent's domain.
                         uniform_distribution = (
-                            self._sample_domain(parent_feature, N)
+                            self.sample_domain(parent_feature, N)
                             .unsqueeze(0)
                             .expand(n_start_queries, -1)
                         )
@@ -258,24 +260,30 @@ class Node:
                     parents_evaluation_points
                 )
         else:
-            n_start_queries = 1
-            parents_evaluation_points = torch.empty(
-                (n_start_queries, len(self.parents_names), N),
-                device=self.device,
-                dtype=self.fixed_dtype,
-            )
-            for i, parent_feature in enumerate(self.parents_names):
-                uniform_distribution = (
-                    self._sample_domain(parent_feature, N)
-                    .unsqueeze(0)
-                    .expand(n_start_queries, -1)
+            if len(self.parents_names) > 0:
+                n_start_queries = 1
+                parents_evaluation_points = torch.empty(
+                    (n_start_queries, len(self.parents_names), N),
+                    device=self.device,
+                    dtype=self.fixed_dtype,
                 )
-                parents_evaluation_points[:, i, :] = uniform_distribution
-            new_query = self._batched_meshgrid_combinations(parents_evaluation_points)
+                for i, parent_feature in enumerate(self.parents_names):
+                    uniform_distribution = (
+                        self.sample_domain(parent_feature, N)
+                        .unsqueeze(0)
+                        .expand(n_start_queries, -1)
+                    )
+                    parents_evaluation_points[:, i, :] = uniform_distribution
+                new_query = self._batched_meshgrid_combinations(
+                    parents_evaluation_points
+                )
+            else:
+                new_query = None
+                parents_evaluation_points = None
 
         return new_query, parents_evaluation_points
 
-    def _sample_domain(self, node: str, N: int = 1024) -> torch.Tensor:
+    def sample_domain(self, node: str, N: int = 1024) -> torch.Tensor:
         min_value, max_value, domain_kind, domain_values = self.info[node]
         cardinality = domain_values.shape[0]
 
@@ -313,10 +321,16 @@ class Node:
                     new_values.append(candidate)
                     existing.add(candidate)
 
-            # Convert our new list to a Tensor and concatenate
-            new_values_tensor = torch.tensor(
-                new_values, dtype=domain_values.dtype, device=self.device
+            new_values_tensor = torch.stack(
+                [
+                    v if isinstance(v, torch.Tensor) else torch.tensor(v)
+                    for v in new_values
+                ]
             )
+            new_values_tensor = new_values_tensor.to(
+                dtype=domain_values.dtype, device=self.device
+            )
+
             out = torch.cat([domain_values, new_values_tensor])
 
             # Finally, sort before returning
@@ -371,11 +385,11 @@ class Node:
     def load_node(self, path: str):
         raise NotImplementedError  # model (and info domains?)
 
-    def _plot_pdfs(
+    def _plot_pdfs2(
         self,
         pdfs: torch.Tensor,
         node_domains: torch.Tensor,
-        parents_domains: torch.Tensor,
+        parents_domains: torch.Tensor = None,
     ):
         """
         Args:
@@ -512,4 +526,108 @@ class Node:
             subtitle = subtitle[:-2]
             subtitle += ")"
             fig.suptitle(subtitle)
+            plt.show()
+
+    def _plot_pdfs(
+        self,
+        pdfs: torch.Tensor,
+        node_domains: torch.Tensor,
+        parents_domains: torch.Tensor = None,
+    ):
+        """
+        Plot PDFs for a target node given its parent values or just the marginal if parents_domains is None.
+
+        Args:
+            pdfs (torch.Tensor): Shape [n_queries, d0, ..., d_{n_parents-1}, n_samples_node] or [n_queries, n_samples_node] if marginal.
+            node_domains (torch.Tensor): [n_queries, n_node_values]
+            parents_domains (torch.Tensor or None): [n_queries, n_parents, (1 or N)] or None
+        """
+        import math
+
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        pdfs_np = pdfs.detach().cpu().numpy()
+        node_domains_np = node_domains.detach().cpu().numpy()
+
+        n_queries = pdfs_np.shape[0]
+
+        if parents_domains is None:
+            # === Plot marginal P(node) ===
+            for q in range(n_queries):
+                fig = plt.figure(dpi=300)
+                node_vals = node_domains_np[q]
+                pdf_vals = pdfs_np[q]  # shape [n_samples_node]
+
+                max_idx = np.argmax(pdf_vals)
+                max_value = node_vals[max_idx]
+                point_max = pdf_vals[max_idx]
+
+                plt.plot(node_vals, pdf_vals)
+                plt.scatter(
+                    max_value, point_max, c="red", s=100, label=f"max={max_value:.2f}"
+                )
+                plt.xlabel(f"Domain of {self.node_name}")
+                plt.ylabel("PDF")
+                plt.ylim(-0.01, 1.01)
+                plt.title(f"Query {q} - P({self.node_name})")
+                plt.legend()
+                plt.grid(True)
+                plt.show()
+            return  # Exit after handling the marginal case
+
+        # === Conditional case P(node | parents) ===
+        parents_domains_np = parents_domains.detach().cpu().numpy()
+        parent_dims = pdfs_np.shape[1:-1]
+        n_parents = len(parent_dims)
+
+        for q in range(n_queries):
+            n_cols = min(n_parents, 2)
+            n_rows = math.ceil(n_parents / n_cols)
+
+            fig = plt.figure(figsize=(8 * n_cols, 4.5 * n_rows), dpi=300)
+            subtitle = f"Query {q} - P({self.node_name}|"
+
+            for p in range(n_parents):
+                parent_vals = parents_domains_np[q, p, :]
+                node_vals = node_domains_np[q]
+                unique_parent_vals = np.unique(parent_vals)
+
+                n_parent_axes = len(pdfs_np[q].shape) - 1
+                axes_to_avg = tuple(i for i in range(n_parent_axes) if i != p)
+                pdf_plot = np.sum(pdfs_np[q], axis=axes_to_avg)
+                pdf_plot = pdf_plot / pdf_plot.sum()
+
+                if len(unique_parent_vals) > 1:
+                    subtitle += f"{self.parents_names[p]}, "
+                    ax = fig.add_subplot(n_rows, n_cols, p + 1, projection="3d")
+                    P, N = np.meshgrid(parent_vals, node_vals, indexing="ij")
+                    surf = ax.plot_surface(
+                        N,
+                        P,
+                        pdf_plot,
+                        cmap="viridis",
+                        edgecolor="k",
+                        linewidth=0.5,
+                        alpha=0.9,
+                    )
+                    ax.set_title(f"{self.parents_names[p]}")
+                    ax.set_xlabel(f"Domain of {self.node_name}")
+                    ax.set_ylabel(f"Domain of {self.parents_names[p]}")
+                    ax.set_zlabel("PDF")
+                    fig.colorbar(surf, ax=ax, shrink=0.7, aspect=15)
+                else:
+                    subtitle += f"{self.parents_names[p]}={unique_parent_vals[0]}, "
+                    ax = fig.add_subplot(n_rows, n_cols, p + 1)
+                    mean_pdf = np.mean(pdf_plot, axis=0)
+                    ax.plot(node_vals, mean_pdf, marker="o")
+                    ax.set_title(f"{self.parents_names[p]} = {unique_parent_vals[0]}")
+                    ax.set_xlabel(f"Domain of {self.node_name}")
+                    ax.set_ylabel("PDF")
+                    ax.set_ylim(-0.01, 1.01)
+                    ax.grid(True)
+
+            subtitle = subtitle.rstrip(", ") + ")"
+            fig.suptitle(subtitle, fontsize=14)
+            fig.tight_layout(rect=[0, 0.03, 1, 0.95])
             plt.show()
