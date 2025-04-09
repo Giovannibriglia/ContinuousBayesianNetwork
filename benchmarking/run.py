@@ -31,8 +31,9 @@ if __name__ == "__main__":
     env_ids.remove("GymV26Environment-v0")
     env_ids.remove("Ant-v5")
     env_ids.remove("Humanoid-v5")
-    env_ids = ["HumanoidStandup-v5"]
-    n_steps = 100
+    env_ids.remove("HumanoidStandup-v5")
+    # env_ids = ["HumanoidStandup-v5"]
+    n_steps = 10000
 
     for env_index, env_id in enumerate(env_ids):
         if (
@@ -53,7 +54,7 @@ if __name__ == "__main__":
         )
 
         # Load the YAML file
-        with open("../cbn/conf/parameter_learning/gp_gpytorch.yaml", "r") as file:
+        with open("../cbn/conf/parameter_learning/brute_force.yaml", "r") as file:
             parameters_learning_config = yaml.safe_load(file)
 
         # Load the YAML file
@@ -64,6 +65,8 @@ if __name__ == "__main__":
             dag,
             data,
             target_feature,
+            parameters_learning_config,
+            inference_config,
             if_discrete,
             batch_size=512,
             task_name=env_id,

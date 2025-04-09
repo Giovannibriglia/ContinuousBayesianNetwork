@@ -447,7 +447,7 @@ def benchmarking_df(
             target_node,
             evidence,
             plot_prob=False,
-            N_max=batch_size,
+            N_max=16,
         )
 
         # Get indices of max probabilities along dimension 1 (columns)

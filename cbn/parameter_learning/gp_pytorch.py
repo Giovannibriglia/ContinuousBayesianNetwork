@@ -113,7 +113,7 @@ class GP_gpytorch(BaseParameterLearningEstimator):
         for _ in bar:
             optimizer.zero_grad()
             output = self.model(X)
-            loss = -mll(output, y)
+            loss = -mll(output, y.to(torch.float32))
             loss.backward()
             optimizer.step()
             if self.if_log:
