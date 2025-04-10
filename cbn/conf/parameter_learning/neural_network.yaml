@@ -1,0 +1,12 @@
+
+estimator_name: "neural_network"
+
+model:
+  hidden_dims: [16]
+  activation: tanh
+
+optimizer:
+  name: "Adam"
+
+train:
+  n_epochs: 1000
