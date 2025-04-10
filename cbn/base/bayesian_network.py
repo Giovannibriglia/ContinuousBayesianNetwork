@@ -295,7 +295,10 @@ class BayesianNetwork:
         if evidence is None:
             n_queries = 1
         else:
-            n_queries = evidence[next(iter(evidence.keys()))].shape[0]
+            if len(evidence.keys()) > 0:
+                n_queries = evidence[next(iter(evidence.keys()))].shape[0]
+            else:
+                n_queries = 1
 
         n_samples_node = (
             self.nodes_obj[target_node].sample_domain(target_node, N_max).shape[0]

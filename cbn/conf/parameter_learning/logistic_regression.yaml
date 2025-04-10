@@ -1,0 +1,8 @@
+
+estimator_name: "logistic_regression"
+
+optimizer:
+  name: "Adam"
+
+train:
+  n_epochs: 1000
