@@ -48,7 +48,7 @@ class GP_gpytorch(BaseParameterLearningEstimator):
     def _setup_model(self, config: Dict, **kwargs):
         config_model = config.get("model", {})
         self.config_optimizer = config.get("optimizer")
-        config_train = config.get("train")
+        config_train = config.get("train", {})
 
         model_key = config_model.get("model", "ExactGP")
         self.model_class = getattr(gpytorch.models, model_key)

@@ -34,7 +34,7 @@ class BaseParameterLearningEstimator(ABC):
     ) -> torch.Tensor:
         """
         :param point_to_evaluate: [n_queries, domain_node_feature]
-        :param query: [n_queries, n_features, n_combinations]
+        :param query: [n_queries, n_features, 1]
         :return: pdf [n_queries, domain_node_feature]
         """
         return self._get_prob(point_to_evaluate, query)
