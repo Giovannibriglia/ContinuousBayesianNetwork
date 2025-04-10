@@ -15,14 +15,14 @@ if __name__ == "__main__":
     dag.add_edges_from([("obs_0", "reward"), ("action", "reward")])
 
     # Load the YAML file
-    with open("../conf/parameter_learning/brute_force.yaml", "r") as file:
+    with open("../conf/parameter_learning/neural_network.yaml", "r") as file:
         parameters_learning_config = yaml.safe_load(file)
 
     # Load the YAML file
     with open("../conf/inference/exact.yaml", "r") as file:
         inference_config = yaml.safe_load(file)
 
-    kwargs = {"log": False, "plot_prob": False}
+    kwargs = {"log": False, "plot_prob": True}
 
     # Initialize the Bayesian Network
     bn = BayesianNetwork(
@@ -41,13 +41,13 @@ if __name__ == "__main__":
         # "obs_0": torch.tensor([[10], [14], [10]], device="cuda"),
     }
 
-    pdfs, target_node_domains, parents_domains = bn.get_pdf(
+    """pdfs, target_node_domains, parents_domains = bn.get_pdf(
         target_node,
         evidence,
-        N_max=16,
+        N_max=64,
     )
     print("PDF: ", pdfs.shape)
     print("Target node Domains: ", target_node_domains.shape)
-    print("Parents Domains: ", parents_domains.shape)
+    print("Parents Domains: ", parents_domains.shape)"""
 
     pdf, domain = bn.infer(target_node, evidence, N_max=64, plot_prob=True)

@@ -1,0 +1,9 @@
+benchmark_suite:
+  - suite: "gymnasium"
+    bn_backend: "pgmpy"
+    if_discrete: true
+    target_feature: "reward"
+  - suite: "vmas"
+    bn_backend: "custom"
+    if_discrete: false
+    target_feature: "velocity"

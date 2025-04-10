@@ -27,15 +27,17 @@ class LogisticRegression(BaseParameterLearningEstimator):
         if parents_data is not None:
             # Expected shape: [n_parents, n_samples]; transpose to [n_samples, n_parents].
             input_dim = parents_data.shape[0]
-            queries = parents_data.transpose(0, 1).to(device)
+            queries = parents_data.transpose(0, 1).to(device).to(torch.float32)
         else:
             # For an intercept-only model (no parent features), use a dummy vector of ones.
             input_dim = 1
-            queries = torch.ones((node_data.shape[0], 1), device=device)
+            queries = torch.ones((node_data.shape[0], 1), device=device).to(
+                torch.float32
+            )
 
         # Initialize the linear model and the logistic scale parameter if not already done.
         if self.linear_model is None:
-            self.linear_model = nn.Linear(input_dim, 1).to(device)
+            self.linear_model = nn.Linear(input_dim, 1).to(device).to(torch.float32)
             # Initialize log_scale to log(1)=0 so that scale = exp(0) = 1.
             self.log_scale = nn.Parameter(torch.tensor(0.0, device=device))
 

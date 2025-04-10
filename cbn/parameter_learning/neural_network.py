@@ -58,15 +58,17 @@ class NeuralNetwork(BaseParameterLearningEstimator):
         if parents_data is not None:
             input_dim = parents_data.shape[0]
             # Transpose to shape [n_samples, n_parents].
-            queries = parents_data.transpose(0, 1).to(device)
+            queries = parents_data.transpose(0, 1).to(device).to(torch.float32)
         else:
             input_dim = 1
             # For an intercept-only model, use a dummy input of ones.
-            queries = torch.ones((node_data.shape[0], 1), device=device)
+            queries = torch.ones((node_data.shape[0], 1), device=device).to(
+                torch.float32
+            )
 
         # Build the neural network if it hasn't been created yet.
         if self.nn_model is None:
-            self.nn_model = self._build_nn(input_dim).to(device)
+            self.nn_model = self._build_nn(input_dim).to(device).to(torch.float32)
             # Initialize log_scale to 0 so that scale = exp(0) = 1.
             self.log_scale = nn.Parameter(torch.tensor(0.0, device=device))
 

@@ -31,16 +31,16 @@ class LinearRegression(BaseParameterLearningEstimator):
             # parents_data is assumed to be shaped [n_parents, n_samples]
             input_dim = parents_data.shape[0]
             # Transpose to get [n_samples, n_parents] for our training
-            queries = parents_data.transpose(0, 1).to(device)
+            queries = parents_data.transpose(0, 1).to(device).to(torch.float32)
         else:
             # No parents provided implies the node is standalone.
             # We use a one-dimensional input derived from node_data.
             input_dim = 1
-            queries = node_data.unsqueeze(1).to(device)
+            queries = node_data.unsqueeze(1).to(device).to(torch.float32)
 
         # Setup the linear layer and the learnable log_sigma parameter if not already done.
         if self.linear_model is None:
-            self.linear_model = nn.Linear(input_dim, 1).to(device)
+            self.linear_model = nn.Linear(input_dim, 1).to(device).to(torch.float32)
             # log_sigma is initialized to log(1.0)
             self.log_sigma = nn.Parameter(torch.log(torch.tensor(1.0, device=device)))
 

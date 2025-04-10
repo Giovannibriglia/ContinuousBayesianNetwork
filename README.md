@@ -50,7 +50,7 @@ This project provides a modular framework with separate components for:
 - [X] **Gaussian Process #1**: integrates Gaussian processes for non-linear parameter estimation. Library: *gpytorch*
 - [X] **Linear Regression**:
 - [X] **Logistic Regression**:
-- [ ] **Deep Learning**:
+- [X] **Deep Learning**:
 
 ### Input Data Support
 

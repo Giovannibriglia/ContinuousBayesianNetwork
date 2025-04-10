@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Dict, List, Tuple
 
 import networkx as nx
+import numpy as np
 import pandas as pd
 import torch
 
@@ -65,7 +66,7 @@ class BayesianNetwork:
         # TODO: training in parallel
         for node in pbar:
             pbar.set_postfix(training_node=f"{node}")
-            node_data = torch.tensor(data[node], device=self.device)
+            node_data = torch.tensor(data[node].values, device=self.device)
 
             node_parents = self.get_parents(self.initial_dag, node)
             parents_data = (
@@ -158,11 +159,8 @@ class BayesianNetwork:
         for feature, values in evidence.items():
             if feature in target_node_parents:
                 query[feature] = values
-            else:
-                """print(
-                    f"{feature} is not parent of {target_node}, for this reason will not be considered in the probability computation."
-                )"""
-                pass
+            # {feature} is not parent of {target_node}, for this reason will not be considered in the probability computation.
+
         pdfs, target_node_domains, parents_domains = self.nodes_obj[
             target_node
         ].get_prob(query, N_max)
@@ -172,76 +170,6 @@ class BayesianNetwork:
         # [n_queries, (n_parents)*n_samples_for_parent]
 
         return pdfs, target_node_domains, parents_domains
-
-    @staticmethod
-    def _safe_normalize_pdf(pdf: torch.Tensor, epsilon: float) -> torch.Tensor:
-        """
-        Safely normalize a PDF along the `n_values` dimension, handling large or negative values.
-
-        Args:
-            pdf (torch.Tensor): Input tensor of shape [n_queries, n_values].
-            epsilon (float): Small value to prevent division by zero.
-
-        Returns:
-            torch.Tensor: Normalized PDF with the sum of each row equal to 1.
-        """
-        # Shift values to avoid extremely large negatives affecting normalization
-        pdf_max = pdf.max(dim=1, keepdim=True).values
-        pdf_shifted = pdf - pdf_max  # Ensure numerical stability
-
-        # Convert to positive values (exponentiate)
-        pdf_exp = torch.exp(pdf_shifted)
-
-        # Normalize
-        return pdf_exp / (pdf_exp.sum(dim=1, keepdim=True) + epsilon)
-
-    def infer2(
-        self,
-        target_node: str,
-        evidence: Dict[str, torch.Tensor] = None,
-        do: List[str] = None,
-        N_max: int = 16,
-    ):
-        """
-        :param target_node:
-        :param evidence: for each key a torch tensor with shape [n_queries, 1].
-        :param do: list of str
-        :param N_max:
-        :return: [n_queries, n_values]
-        """
-
-        dag = self.initial_dag
-        if do is not None:
-            # TODO
-            dag = self.initial_dag
-
-        ancestors_target_node = self.get_ancestors(dag, target_node)
-        ancestors_target_node.append(target_node)
-
-        pdfs_dict = {}
-        target_node_domains_dict = {}
-        parents_domains_dict = {}
-
-        for node in ancestors_target_node:
-            pdfs, target_node_domains, parents_domains = self.get_pdf(
-                node, evidence, N_max
-            )
-
-            pdfs_dict[node] = (
-                pdfs  # [n_queries, [n_samples]*n_parents, n_samples_target]
-            )
-            target_node_domains_dict[node] = (
-                target_node_domains  # [n_queries, n_samples_node]
-            )
-            parents_domains_dict[node] = (
-                parents_domains  # [n_queries, (n_parents)*n_samples_for_parent]
-            )
-
-        print("RIPARTI DA QUI")
-
-        """return self.inference_obj.infer(
-            pdfs_dict, target_node_domains_dict, parents_domains_dict
-        )"""
 
     def infer(
         self,
@@ -363,3 +291,49 @@ class BayesianNetwork:
         plt.legend(loc="best")
         plt.grid(True)
         plt.show()
+
+    def benchmarking_df(
+        self, data: pd.DataFrame, target_feature: str, batch_size: int = 128, **kwargs
+    ) -> np.ndarray:
+
+        dict_values = {
+            feat: torch.tensor(data[feat].values, device="cpu")
+            for feat in data.columns
+            if feat != target_feature
+        }
+
+        pred_values = np.zeros((len(data),))
+
+        progress_bar = tqdm(total=len(data), desc="benchmarking df cbn...")
+        for n in range(0, len(data), batch_size):
+            evidence = {
+                feat: dict_values[feat][n : n + batch_size].unsqueeze(-1).to("cuda")
+                for feat in data.columns
+                if feat != target_feature
+            }
+
+            inference_probabilities, domain_values = self.infer(
+                target_feature,
+                evidence,
+                plot_prob=False,
+                N_max=16,
+            )
+
+            # Get indices of max probabilities along dimension 1 (columns)
+            max_probabilities_indices = torch.argmax(
+                inference_probabilities, dim=1, keepdim=True
+            )  # Shape [batch_size, 1]
+            # Gather the corresponding domain values
+            pred_values_batch = (
+                torch.gather(domain_values, dim=1, index=max_probabilities_indices)
+                .squeeze(1)
+                .cpu()
+                .numpy()
+            )  # Shape [batch_size]
+
+            pred_values[n : n + batch_size] = pred_values_batch
+
+            batch_end = min(n + batch_size, len(data))
+            progress_bar.update(batch_end - n)  # Update by actual batch size
+
+        return pred_values
