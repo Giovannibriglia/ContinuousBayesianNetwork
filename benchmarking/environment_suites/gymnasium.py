@@ -21,7 +21,7 @@ class BenchmarkingGymnasiumEnvs(BaseBenchmarkingEnvs):
         env_ids.remove("GymV21Environment-v0")
         env_ids.remove("GymV26Environment-v0")
 
-        return env_ids[:10]
+        return env_ids
 
     @staticmethod
     def get_latest_envs(env_keys):

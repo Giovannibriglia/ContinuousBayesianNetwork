@@ -34,8 +34,6 @@ def get_pgmpy_combinations() -> List[Dict]:
     inference_objs = [
         "VariableElimination",
         "ApproxInference",
-        "continuous",
-        "BeliefPropagationWithMessagePassing",
     ]
 
     combs = []
@@ -66,7 +64,7 @@ def get_pyagrum_combinations() -> List[Dict]:
     for prob in prob_estimators:
         for inf in inference_objs:
             comb = {
-                "bn_library": "pgmpy",
+                "bn_library": "pyagrum",
                 "prob_config": {"estimator_name": prob},
                 "infer_config": {"inference_obj": inf},
             }
