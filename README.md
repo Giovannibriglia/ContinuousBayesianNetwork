@@ -2,7 +2,7 @@
 
 A **PyTorch-based Bayesian Network framework** that supports both **discrete** and **continuous** data types. Optimized
 for GPU acceleration and batch operations, this framework is designed for dynamic network structures and multi-agent
-scenarios, offering a flexible and scalable approach to Bayesian inference.
+scenarios, offering a flexible and scalable approach to learn and inference probabilities in complex domains.
 
 ## Overview
 
@@ -28,29 +28,45 @@ This project provides a modular framework with separate components for:
 - **Inference**
 
 ### Inference Engine
-- **Exact Inference:**
-  - [ ] **Variable Elimination**
-  - [ ] Belief Propagation (message passing)
-  - [ ] Junction Tree Algorithm
-- **Approximate Inference:**
-  - [ ] Markov Chain Monte Carlo (MCMC)
-  - [ ] Variational Inference
-  - [ ] Gibbs Sampling
-  - [ ] Forward Sampling
-- **Causal Inference:**
-  - [ ] Backdoor Adjustment
-  - [ ] Frontdoor Adjustment
-  - [ ] Average Treatment Effect (ATE)
+| Status | Inference Kind | Engine                   | Auxiliary Library | Summary                                                            | Inference Complexity |
+|--------|----------------|--------------------------|-------------------|--------------------------------------------------------------------|----------------------|
+| Done   | Exact          | Variable Elimination     | PyTorch           | Eliminates variables to compute exact marginals                    | O(N × exp(W))        |
+| TODO   | Exact          | Belief Propagation       | PyTorch           | Message passing in tree or loopy graphs for marginals              | O(N × d²)            |
+| TODO   | Exact          | Junction Tree Algorithm  | PyTorch           | Converts graph into tree of cliques for efficient exact inference  | O(N × exp(T))        |
+| TODO   | Approximate    | Markov Chain Monte Carlo | PyTorch           | Samples from posterior via random walk (e.g., Metropolis-Hastings) | O(K × N)             |
+| TODO   | Approximate    | Variational Inference    | PyTorch           | Optimizes a simpler distribution to approximate the posterior      | O(I × N × D)         |
+| TODO   | Approximate    | Gibbs Sampling           | PyTorch           | Iteratively samples each variable conditioned on the rest          | O(K × N × d)         |
+| TODO   | Approximate    | Forward Sampling         | PyTorch           | Samples from joint by following the topological order              | O(N)                 |
+| TODO   | Causal         | Backdoor Adjustment      | PyTorch           | Adjusts for confounders to estimate causal effects                 | O(N × d)             |
+| TODO   | Causal         | Frontdoor Adjustment     | PyTorch           | Adjusts for mediators in specific structures                       | O(N × d²)            |
+| TODO   | Causal         | Average Treatment Effect | PyTorch           | Computes expected difference in outcome from treatment vs. control | O(N)                 |
 
-### Parameter Learning Tasks
+where:
+- *N* is the number of variables
+- *d* is the domain size per variable
+- *W* is the tree-width of the graph (for VE and Junction Tree)
+- *T* is the size of the largest clique in junction tree
+- *K* is the number of MCMC samples
+- *I* is the number of optimization iterations
+- *D* is the dimensionality of approximate distribution
 
-- [X] **Brute Force discrete MLE**: implements exhaustive likelihood maximization (acts as a database for parameter estimates).
-- [ ] **Brute Force continuous MLE**: implements exhaustive likelihood maximization (acts as a database for parameter estimates).
-- [ ] **Bayesian Estimation**: incorporates priors to update beliefs based on observed data.
-- [X] **Gaussian Process #1**: integrates Gaussian processes for non-linear parameter estimation. Library: *gpytorch*
-- [X] **Linear Regression**:
-- [X] **Logistic Regression**:
-- [X] **Deep Learning**:
+### Parameter Learning
+
+| Status | Estimator              | Auxiliary Library | Summary                                                    | Learns Over Time      | Transferability                  | Training Complexity | Inference Complexity |
+|--------|------------------------|-------------------|------------------------------------------------------------|-----------------------|----------------------------------|---------------------|----------------------|
+| Done   | Brute Force Discrete   | PyTorch           | Stores and queries parameters from a discrete database     | Yes (adds data)       | Low – specific to data points    | O(N)                | O(1)                 |
+| TODO   | Brute Force Continuous | PyTorch           | Explores full parameter space for continuous distributions | Yes (adds data)       | Low – specific to data points    | O(N × D)            | O(1)                 |
+| TODO   | Bayesian Estimator     | PyTorch           | Incorporates priors and updates posterior over time        | Yes (Bayesian update) | High – priors and uncertainty    | O(N × D²)           | O(D²)                |
+| Done   | Gaussian Processes     | GPyTorch          | Non-parametric model with uncertainty estimation           | Yes (online updates)  | Medium – kernel & prior settings | O(N³)               | O(N)                 |
+| Done   | Linear Regression      | PyTorch           | Models linear relationship between inputs and output       | No                    | Medium – learned coefficients    | O(N × D²)           | O(D)                 |
+| Done   | Logistic Regression    | PyTorch           | Classifier for binary or multiclass outputs                | No                    | Medium – learned coefficients    | O(N × D)            | O(D)                 |
+| Done   | Neural Network         | PyTorch           | Learns non-linear functions from data                      | Yes (backpropagation) | High – feature representations   | O(E × N × D)        | O(D)                 |
+
+where:
+- *N* is the number of data points (samples)
+- *D* is the number of features (dimensions)
+- *E* is number of training epochs
+
 
 ### Input Data Support
 
@@ -68,6 +84,7 @@ This project provides a modular framework with separate components for:
 
 - **Multi-Agent Interactions:**
   Explore methods to combine Conditional Bayesian Networks (CBNs) to simulate and manage inter-agent interactions.
+- **Adding knowledge over time**
 - **Current Problems:**
   - [List any current bugs or issues here]
 - **Additional Enhancements:**
