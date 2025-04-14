@@ -18,7 +18,7 @@ class Benchmarking:
     def __init__(self, envs_suites: List[str], bn_libraries: List[str], **kwargs):
         self.envs_suites = envs_suites
         self.bn_combinations = get_bn_combinations(bn_libraries)
-        print(self.bn_combinations)
+
         self.device = kwargs.get("device", "cpu")
         self.dir_saving = None
 
@@ -105,7 +105,6 @@ class Benchmarking:
                         prob_estimator = prob_config["estimator_name"]
                         infer_obj = infer_config["inference_obj"]
 
-                        print("\n")
                         print(
                             f"Seed: {seed} | Env: {env_id} | Bayesian network from: {bn_lib} | Parameter Learning: {prob_estimator} | Inference: {infer_obj}"
                         )
@@ -161,6 +160,7 @@ class Benchmarking:
                         self._store_metrics(
                             predictions, targets, simulation_info, is_discrete
                         )
+                        print("\n")
 
     def _store_metrics(
         self,
@@ -183,6 +183,15 @@ class Benchmarking:
             recall_score,
         )
 
+        # Create a mask to ignore NaNs in y_true or y_pred
+        mask = ~np.isnan(y_true) & ~np.isnan(y_pred)
+
+        metrics_dict["predicted"] = f"{np.sum(mask).item()}/{len(y_pred)}"
+
+        # Apply mask before calling mean_absolute_error
+        y_true = y_true[mask]
+        y_pred = y_pred[mask]
+
         if not np.isnan(y_pred).all():
             if not is_discrete:
                 # Continuous (Regression) metrics
@@ -198,8 +207,11 @@ class Benchmarking:
                 metrics_dict["MSE"] = mse_val
                 metrics_dict["R2"] = r2_val
                 metrics_dict["MAPE"] = mape_val
-                metrics_dict[f"conf_int_{int(confidence_interval * 100)}"] = (
-                    conf_int_val
+                metrics_dict[f"low_conf_int_{int(confidence_interval * 100)}"] = (
+                    conf_int_val[0]
+                )
+                metrics_dict[f"up_conf_int_{int(confidence_interval * 100)}"] = (
+                    conf_int_val[1]
                 )
             else:
                 # Discrete (Classification) metrics
@@ -239,6 +251,13 @@ class Benchmarking:
                     metrics_dict[f"conf_int_{int(confidence_interval * 100)}"] = (
                         np.nan
                     )  # returns a tuple
+                    metrics_dict[f"low_conf_int_{int(confidence_interval * 100)}"] = (
+                        np.nan
+                    )
+                    metrics_dict[f"up_conf_int_{int(confidence_interval * 100)}"] = (
+                        np.nan
+                    )
+
                 else:
                     # Multiclass classification
                     metrics_dict["Accuracy"] = accuracy_score(y_true, y_pred) * 100
@@ -255,9 +274,12 @@ class Benchmarking:
                     metrics_dict["F1"] = (
                         f1_score(y_true, y_pred, average="macro", zero_division=0) * 100
                     )
-                    metrics_dict[f"conf_int_{int(confidence_interval * 100)}"] = (
+                    metrics_dict[f"low_conf_int_{int(confidence_interval * 100)}"] = (
                         np.nan
-                    )  # returns a tuple
+                    )
+                    metrics_dict[f"up_conf_int_{int(confidence_interval * 100)}"] = (
+                        np.nan
+                    )
 
         # ---- 2) Read or create the DataFrame from disk  ----
         if os.path.exists(f"{self.dir_saving}/{name}.xlsx"):
@@ -336,13 +358,18 @@ def ask_list_from_user(prompt):
 
 
 if __name__ == "__main__":
-    envs_suites = ask_list_from_user("envs_suites")  # vmas, gymnasium
-    bn_libs = ask_list_from_user("bn_libs")  # my_bn, pgmpy, pyagrum
+    envs_suites = [
+        "cause_effect_pairs"
+    ]  # ask_list_from_user("envs_suites")  # vmas, gymnasium "cause_effect_pairs"
+    bn_libs = [
+        "pyagrum",
+        "my_bn",
+        "pgmpy",
+    ]  # ask_list_from_user("bn_libs")  # my_bn, pgmpy, pyagrum
 
     b = Benchmarking(envs_suites, bn_libs)
 
-    n_seeds = 1
-    test_size = 0.2
-    n_steps = int(1e5)
+    n_seeds = 1  # int(input("Number of seeds: "))
+    test_size = 0.2  # float(input("Test size as float: "))
 
     b.run(n_seeds, test_size)

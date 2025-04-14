@@ -39,7 +39,7 @@ class PgmpyBN(BaseBayesianNetwork):
         **kwargs,
     ):
         from pgmpy import estimators, inference
-        from pgmpy.models import BayesianNetwork
+        from pgmpy.models import DiscreteBayesianNetwork
 
         try:
             estimator_cls = getattr(
@@ -53,11 +53,17 @@ class PgmpyBN(BaseBayesianNetwork):
         inference_cls = getattr(inference, inference_config["inference_obj"])
 
         # Convert NetworkX DAG to pgmpy BayesianNetwork
-        self.model = BayesianNetwork([tuple(edge) for edge in dag.edges])
+        model = DiscreteBayesianNetwork(dag)
 
-        self.model.fit(data, estimator=estimator_cls)
+        estimator = estimator_cls(model=model, data=data)
+        # Estimate all the CPDs for `new_model`
+        all_cpds = estimator.get_parameters()
 
-        self.inference_cls = inference_cls
+        # Add the estimated CPDs to the model.
+        model.add_cpds(*all_cpds)
+        # model.check_model()
+        self.inference_obj = inference_cls(model)
+
         self.target_feature = target_feature
 
         return self
@@ -66,7 +72,9 @@ class PgmpyBN(BaseBayesianNetwork):
         self, data: pd.DataFrame, batch_size: int = 128, **kwargs
     ) -> np.ndarray:
 
-        inference_obj = self.inference_cls(self.model)
+        import logging
+
+        logging.getLogger("pgmpy").setLevel(logging.ERROR)
 
         pred_values = np.zeros(len(data))
 
@@ -74,14 +82,18 @@ class PgmpyBN(BaseBayesianNetwork):
             data.iterrows(), desc="benchmarking df pgmpy...", total=len(data)
         ):
             evidence = {
-                feat: row[feat_idx]
+                feat: row.iloc[feat_idx].item()
                 for feat_idx, feat in enumerate(data.columns)
                 if feat != self.target_feature
             }
-
-            query_result = inference_obj.map_query(
-                variables=[self.target_feature], evidence=evidence, show_progress=False
-            )
-            pred_values[n] = query_result[self.target_feature]
+            try:
+                query_result = self.inference_obj.map_query(
+                    variables=[self.target_feature],
+                    evidence=evidence,
+                    show_progress=False,
+                )
+                pred_values[n] = query_result[self.target_feature]
+            except Exception:
+                pred_values[n] = np.nan
 
         return pred_values

@@ -28,12 +28,12 @@ def get_bn_combinations(bn_libraries: List[str]) -> List[Dict]:
 def get_pgmpy_combinations() -> List[Dict]:
     prob_estimators = [
         "MaximumLikelihoodEstimator",
-        "BayesianEstimator",
-        "ExpectationMaximization",
+        # "BayesianEstimator",
+        # "ExpectationMaximization",
     ]
     inference_objs = [
         "VariableElimination",
-        "ApproxInference",
+        # "ApproxInference",
     ]
 
     combs = []

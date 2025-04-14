@@ -24,33 +24,14 @@ class BaseBenchmarkingEnvs(ABC):
     ) -> Tuple[pd.DataFrame, str, str, bool]:
         raise NotImplementedError
 
-    @staticmethod
+    @abstractmethod
     def define_dag(
+        self,
         df: pd.DataFrame,
         target_feature: str,
         do_key: str = None,
     ) -> Tuple[nx.DiGraph, List, List]:
-
-        if do_key is not None:
-            observation_features = [
-                s for s in df.columns if do_key not in s and s != target_feature
-            ]
-            intervention_features = [
-                s for s in df.columns if do_key in s and s != target_feature
-            ]
-        else:
-            observation_features = [s for s in df.columns]
-            intervention_features = []
-
-        dag = [(feature, target_feature) for feature in observation_features]
-
-        for int_feature in intervention_features:
-            dag.append((int_feature, target_feature))
-
-        G = nx.DiGraph()
-        G.add_edges_from(dag)
-
-        return G, observation_features, intervention_features
+        raise NotImplementedError
 
 
 class BaseBayesianNetwork(ABC):

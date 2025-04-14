@@ -40,6 +40,7 @@ class PyAgrumBN(BaseBayesianNetwork):
         target_feature: str,
         **kwargs,
     ):
+
         discretizer = Discretizer()
         self.bn = discretizer.discretizedTemplate(data)
         for arc in dag.edges():
