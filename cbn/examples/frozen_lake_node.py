@@ -7,7 +7,7 @@ import yaml
 from cbn.base.node import Node
 
 
-def frozen_lake_node(estimator_name: str, n_queries: int = 10, seed: int = 42):
+def frozen_lake_node(estimator_name: str, seed: int = 42):
 
     torch.random.manual_seed(seed)
     random.seed(seed)
@@ -38,15 +38,9 @@ def frozen_lake_node(estimator_name: str, n_queries: int = 10, seed: int = 42):
     node1.fit(train_y, train_x)
 
     query = {
-        # "obs": obs[:n_queries].unsqueeze(-1),
-        # "action": action[:n_queries].unsqueeze(-1),
-        # "reward": train_y[:n_queries].unsqueeze(-1),
-    }
-
-    """query = {
-        "obs": torch.tensor([[14], [4], [3]], device=device),
+        # "obs": torch.tensor([[14], [4], [3]], device=device),
         # "action": torch.tensor([[2], [1], [3]], device=device),
-    }"""
+    }
 
     pdfs, target_node_domains, parents_domains = node1.get_prob(query, N=64)
 
@@ -54,8 +48,14 @@ def frozen_lake_node(estimator_name: str, n_queries: int = 10, seed: int = 42):
     print("Target domain: ", target_node_domains.shape)
     print("Parents domain: ", parents_domains.shape)
 
+    node1.save_node(estimator_name)
+
+    node1.fit(train_y, train_x)
+
+    pdfs, target_node_domains, parents_domains = node1.get_prob(query, N=64)
+    node1.save_node(estimator_name)
+
 
 if __name__ == "__main__":
     e = input("Estimator: ")
-    q = int(input("Number of queries: "))
-    frozen_lake_node(e, q)
+    frozen_lake_node(e)

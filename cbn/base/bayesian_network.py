@@ -81,6 +81,10 @@ class BayesianNetwork:
         self.inference_obj_name = config["inference_obj"]
         self.inference_obj = choose_inference_obj(self.inference_obj_name, config)
 
+    def save_model(self, path: str):
+        for node in self.nodes_obj:
+            self.nodes_obj[node].save_model(path)
+
     @staticmethod
     def get_nodes(dag: nx.DiGraph):
         return list(dag.nodes)

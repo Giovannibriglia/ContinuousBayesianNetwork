@@ -40,7 +40,6 @@ class GP_gpytorch(BaseParameterLearningEstimator):
     def __init__(self, config: Dict, **kwargs):
         super().__init__(config, **kwargs)
         self._setup_model(config, **kwargs)
-        self.model = None
 
         self.prior_mean = None
         self.prior_var = None
@@ -225,3 +224,29 @@ class GP_gpytorch(BaseParameterLearningEstimator):
                 samples[i, -1] = torch.exp(pred_dist.sample(torch.Size((N,))))
 
         return samples
+
+    def save_model(self, path: str):
+        torch.save(
+            {
+                "model_state_dict": self.model.state_dict(),
+                "likelihood_state_dict": self.likelihood.state_dict(),
+                "input_dim": self.model.input_dim,
+            },
+            f"{path}.pth",
+        )
+
+    def load_model(self, path: str):
+        # Load trained parameters:
+        checkpoint = torch.load(f"{path}.pth")
+
+        input_dim = checkpoint["input_dim"]
+
+        # Dummy data for initialization:
+        dummy_x = torch.zeros(1, input_dim)  # set input_dim correctly
+        dummy_y = torch.zeros(1)
+
+        self.likelihood = gpytorch.likelihoods.GaussianLikelihood()
+        self.model = SimpleGPModel(dummy_x, dummy_y, self.likelihood)
+
+        self.model.load_state_dict(checkpoint["model_state_dict"])
+        self.likelihood.load_state_dict(checkpoint["likelihood_state_dict"])

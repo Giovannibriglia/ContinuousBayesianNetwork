@@ -380,10 +380,10 @@ class Node:
         return out
 
     def save_node(self, path: str):
-        raise NotImplementedError  # model (and info domains?)
+        self.estimator.save_model(path)  # model (and info domains?)
 
     def load_node(self, path: str):
-        raise NotImplementedError  # model (and info domains?)
+        self.estimator.load_model(path)  # model (and info domains?)
 
     def _plot_pdfs2(
         self,
