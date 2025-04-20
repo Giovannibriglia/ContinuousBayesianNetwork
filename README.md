@@ -84,9 +84,11 @@ where:
 
 - **Multi-Agent Interactions:**
   Explore methods to combine Conditional Bayesian Networks (CBNs) to simulate and manage inter-agent interactions.
-- **Adding knowledge over time**
+- **Adding knowledge over time**:
+  - adding data
+  - dynamic data
 - **Current Problems:**
-  - [List any current bugs or issues here]
+  - how do parameters/information change over time if also DAG changes?
 - **Additional Enhancements:**
   - Further methods for both parameter learning and inference are being researched and implemented.
 

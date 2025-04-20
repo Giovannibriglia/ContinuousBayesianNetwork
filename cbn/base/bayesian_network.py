@@ -129,6 +129,26 @@ class BayesianNetwork:
         else:
             raise ValueError(f"{node} type not supported.")
 
+    def update_knowledge(self, data: pd.DataFrame):
+        pbar = tqdm(
+            self.initial_dag.nodes,
+            total=len(self.initial_dag.nodes),
+            desc="updating probability estimator...",
+        )
+        # TODO: updating in parallel
+        for node in pbar:
+            pbar.set_postfix(updating_node=f"{node}")
+            node_data = torch.tensor(data[node].values, device=self.device)
+
+            node_parents = self.get_parents(self.initial_dag, node)
+            parents_data = (
+                torch.tensor(data[node_parents].values, device=self.device).T
+                if node_parents
+                else None
+            )
+            self.nodes_obj[node].fit(node_data, parents_data)
+            pbar.set_postfix(desc="update done!")
+
     @staticmethod
     def get_structure(self, dag: nx.DiGraph):
         structure = {}
