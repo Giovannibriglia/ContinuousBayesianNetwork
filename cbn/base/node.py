@@ -106,7 +106,7 @@ class Node:
                         > self.max_cardinality_for_discrete_domain
                         else KEY_DISCRETE
                     ),
-                    unique_parents_data[i],
+                    torch.unique(unique_parents_data[i]),
                 ]
 
     def sample(self, N: int, **kwargs) -> torch.Tensor:
@@ -114,7 +114,7 @@ class Node:
 
     def get_prob(
         self, query: Dict[str, torch.Tensor], N: int = 1024
-    ) -> Tuple[torch.Tensor, torch.Tensor, List[torch.Tensor]]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         :param query: dict of torch.Tensors, each with shape [n_queries, 1]
         :param N: number of samples if evidence is not provided
@@ -286,11 +286,6 @@ class Node:
     def sample_domain(self, node: str, N: int = 1024) -> torch.Tensor:
         min_value, max_value, domain_kind, domain_values = self.info[node]
         cardinality = domain_values.shape[0]
-
-        # If it's a discrete domain, you might just return all values
-        # (or sample from them randomly if you prefer).
-        if domain_kind == KEY_DISCRETE:
-            return domain_values
 
         # Otherwise, assume it's continuous (or at least "sortable").
         if N < cardinality:

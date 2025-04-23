@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from typing import Dict, Iterable, List, Tuple
 
 import networkx as nx
 import numpy as np
@@ -38,6 +38,8 @@ class BayesianNetwork:
             KEY_MAX_CARDINALITY_FOR_DISCRETE, BASE_MAX_CARDINALITY
         )
 
+        self.log = kwargs.get("log", False)
+
         self.nodes_obj = None
 
         self._setup_parameters_learning(data, parameters_learning_config, **kwargs)
@@ -58,24 +60,16 @@ class BayesianNetwork:
             for node in self.initial_dag.nodes
         }
 
-        pbar = tqdm(
-            self.initial_dag.nodes,
-            total=len(self.initial_dag.nodes),
-            desc="training probability estimator...",
-        )
-        # TODO: training in parallel
-        for node in pbar:
-            pbar.set_postfix(training_node=f"{node}")
-            node_data = torch.tensor(data[node].values, device=self.device)
-
-            node_parents = self.get_parents(self.initial_dag, node)
-            parents_data = (
-                torch.tensor(data[node_parents].values, device=self.device).T
-                if node_parents
-                else None
+        pbar = (
+            tqdm(
+                self.initial_dag.nodes,
+                total=len(self.initial_dag.nodes),
+                desc="training probability estimator...",
             )
-            self.nodes_obj[node].fit(node_data, parents_data)
-            pbar.set_postfix(desc="training done!")
+            if self.log
+            else self.initial_dag.nodes
+        )
+        self._train(data, pbar)
 
     def _setup_inference(self, config: Dict):
         self.inference_obj_name = config["inference_obj"]
@@ -87,7 +81,7 @@ class BayesianNetwork:
 
     @staticmethod
     def get_nodes(dag: nx.DiGraph):
-        return list(dag.nodes)
+        return sorted(list(dag.nodes))
 
     def get_ancestors(self, dag: nx.DiGraph, node: int | str):
         if isinstance(node, str):
@@ -109,45 +103,61 @@ class BayesianNetwork:
 
     def get_parents(self, dag: nx.DiGraph, node: int | str):
         if isinstance(node, str):
-            return list(dag.predecessors(node))
+            return sorted(list(dag.predecessors(node)))
         elif isinstance(node, int):
             node_name = next(
                 (k for k, v in self.column_mapping.items() if v == node), None
             )
-            return list(dag.predecessors(node_name))
+            return sorted((list(dag.predecessors(node_name))))
         else:
             raise ValueError(f"{node} type not supported.")
 
     def get_children(self, dag: nx.DiGraph, node: int | str):
         if isinstance(node, str):
-            return list(dag.successors(node))
+            return sorted(list(dag.successors(node)))
         elif isinstance(node, int):
             node_name = next(
                 (k for k, v in self.column_mapping.items() if v == node), None
             )
-            return list(dag.successors(node_name))
+            return sorted(list(dag.successors(node_name)))
         else:
             raise ValueError(f"{node} type not supported.")
 
     def update_knowledge(self, data: pd.DataFrame):
-        pbar = tqdm(
-            self.initial_dag.nodes,
-            total=len(self.initial_dag.nodes),
-            desc="updating probability estimator...",
+        pbar = (
+            tqdm(
+                self.initial_dag.nodes,
+                total=len(self.initial_dag.nodes),
+                desc="updating probability estimator...",
+            )
+            if self.log
+            else self.initial_dag.nodes
         )
-        # TODO: updating in parallel
+        self._train(data, pbar)
+
+    def _train(self, data: pd.DataFrame, pbar: Iterable | tqdm):
+        is_tqdm = isinstance(pbar, tqdm)
         for node in pbar:
-            pbar.set_postfix(updating_node=f"{node}")
-            node_data = torch.tensor(data[node].values, device=self.device)
+            if is_tqdm:
+                pbar.set_postfix(updating_node=f"{node}")
+
+            node_data = torch.tensor(
+                np.array(data[node].values.tolist(), dtype=np.float32),
+                device=self.device,
+            )
 
             node_parents = self.get_parents(self.initial_dag, node)
             parents_data = (
-                torch.tensor(data[node_parents].values, device=self.device).T
+                torch.tensor(
+                    np.array(data[node_parents].values.tolist(), dtype=np.float32),
+                    device=self.device,
+                ).T
                 if node_parents
                 else None
             )
             self.nodes_obj[node].fit(node_data, parents_data)
-            pbar.set_postfix(desc="update done!")
+            if is_tqdm:
+                pbar.set_postfix(desc="done!")
 
     @staticmethod
     def get_structure(self, dag: nx.DiGraph):
@@ -286,7 +296,7 @@ class BayesianNetwork:
         out_pdf = out_pdf / out_pdf.max()
 
         if plot_prob:
-            self.plot_prob(out_pdf, target_node_domains)
+            self.plot_prob(out_pdf, target_node_domains, target_node)
 
         assert (
             out_pdf.shape == target_node_domains.shape
@@ -295,7 +305,7 @@ class BayesianNetwork:
         return out_pdf, target_node_domains
 
     @staticmethod
-    def plot_prob(pdf, domain):
+    def plot_prob(pdf, domain, target_node: str):
 
         assert pdf.shape == domain.shape, "pdf and domain must have same shape."
 
@@ -309,7 +319,7 @@ class BayesianNetwork:
         plt.figure(dpi=500)
         for q in range(n_queries):
             plt.plot(domain_np[q], pdf_np[q], label=f"query {q}")
-        plt.xlabel("target node domain")
+        plt.xlabel(f"{target_node} domain")
         plt.ylabel("PDF")
         plt.xticks(domain_np[0])
         plt.legend(loc="best")
