@@ -101,8 +101,12 @@ Contributions, issues, and feature requests are welcome! Please check the [issue
 Distributed under the [GNU GENERAL PUBLIC LICENSE](LICENSE).
 
 ## Citation
-
 If you use this framework in your research or projects, please cite it as follows:
 ```
-
+@misc{briglia2025cbn,
+  author       = {Giovanni Briglia},
+  title        = {{\texttt{Continuous and Scalable Bayesian Probabilistic Framework}},
+  howpublished = {\url{[https://github.com/octocat/Hello-World](https://github.com/Giovannibriglia/ContinuousBayesianNetwork)}},
+  year         = {2025},
+}
 ```
